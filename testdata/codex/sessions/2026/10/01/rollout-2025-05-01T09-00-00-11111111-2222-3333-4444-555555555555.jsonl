@@ -1,0 +1,3 @@
+{"id": "11111111-2222-3333-4444-555555555555", "timestamp": "2025-05-01T09:00:00Z", "instructions": ""}
+{"type": "message", "role": "user", "content": [{"type": "input_text", "text": "legacy hello"}]}
+{"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "hi"}]}

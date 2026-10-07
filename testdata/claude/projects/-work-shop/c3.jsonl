@@ -1,0 +1,2 @@
+{"cwd": "/work/shop", "sessionId": "c3", "type": "user", "uuid": "v1", "timestamp": "2026-10-03T09:00:00Z", "message": {"role": "user", "content": "Add dark mode"}}
+{"type": "ai-title", "aiTitle": "Add dark mode toggle", "sessionId": "c3"}

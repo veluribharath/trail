@@ -1,0 +1,35 @@
+version: 2
+project_name: trail
+
+builds:
+  - main: .
+    binary: trail
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  footer: |
+    Unpack the archive for your machine and run `./trail`. On macOS, run `xattr -d com.apple.quarantine ./trail` first because the binary isn't signed.

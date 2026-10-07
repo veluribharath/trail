@@ -1,0 +1,7 @@
+{"type": "summary", "summary": "Someone else's summary", "leafUuid": "not-in-this-file"}
+{"cwd": "/work/shop", "sessionId": "c2", "type": "user", "uuid": "u1", "timestamp": "2026-10-02T09:00:00Z", "message": {"role": "user", "content": "Speed up the checkout page"}}
+{"type": "ai-title", "aiTitle": "Profile checkout latency", "sessionId": "c2"}
+{"cwd": "/work/shop", "sessionId": "c2", "type": "assistant", "uuid": "u2", "timestamp": "2026-10-02T09:01:00Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Looking."}]}}
+{"type": "custom-title", "customTitle": "checkout-perf", "sessionId": "c2"}
+{"type": "ai-title", "aiTitle": "A later generated title", "sessionId": "c2"}
+{"type": "custom-title", "customTitle": "Wrong session", "sessionId": "someone-else"}
