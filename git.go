@@ -82,6 +82,11 @@ func SessionCommits(ctx context.Context, t *Transcript) CommitsResult {
 			if !filepath.IsAbs(p) {
 				p = filepath.Join(s.Cwd, p)
 			}
+			// git reports the top level with symlinks resolved (macOS /var is
+			// /private/var), so resolve the edited path's folder the same way.
+			if d, err := filepath.EvalSymlinks(filepath.Dir(p)); err == nil {
+				p = filepath.Join(d, filepath.Base(p))
+			}
 			if r, err := filepath.Rel(res.Toplevel, p); err == nil && !strings.HasPrefix(r, "..") {
 				edited[filepath.ToSlash(r)] = true
 			}
