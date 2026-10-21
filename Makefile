@@ -10,4 +10,11 @@ test:
 run: build
 	./trail -open
 
-.PHONY: build test run
+# The project site: site/ plus the app's fonts and the README screenshot.
+site:
+	rm -rf _site && mkdir -p _site/fonts
+	cp site/* _site/
+	cp web/fonts/* _site/fonts/
+	cp docs/screenshot.png _site/
+
+.PHONY: build test run site
