@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>trail · see what your coding agents did</title>
+<meta name="description" content="trail finds the session logs Claude Code and Codex leave on your machine, files each session under its project, and shows the transcript next to the changes it made.">
+<meta property="og:title" content="trail">
+<meta property="og:description" content="See what your coding agents did, folder by folder.">
+<meta property="og:image" content="screenshot.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%230E1320'/%3E%3Cpath d='M3.5 12c2.5 0 2-4 4.5-4s2-4 4.5-4' fill='none' stroke='%23F2B544' stroke-width='1.8' stroke-linecap='round' stroke-dasharray='0.1 3'/%3E%3Ccircle cx='12.5' cy='4' r='1.6' fill='%23F2B544'/%3E%3C/svg%3E">
+<link rel="preload" href="fonts/instrument-sans.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap top-in">
+    <a class="brand" href="#" aria-label="trail home">
+      <svg class="mark" viewBox="0 0 20 20" aria-hidden="true">
+        <path class="mark-path" d="M3.5 15.5c3.5 0 2.5-5.5 6.5-5.5s3-5.5 6.5-5.5"/>
+        <circle class="mark-dot" cx="16.5" cy="4.5" r="2.1"/>
+        <circle class="mark-start" cx="3.5" cy="15.5" r="1.5"/>
+      </svg>
+      <span>trail</span>
+    </a>
+    <nav class="top-nav" aria-label="Sections">
+      <a href="#features">Features</a>
+      <a href="#agents">Agents</a>
+      <a href="#install">Install</a>
+      <a class="gh" href="https://github.com/veluribharath/trail">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <section class="hero">
+    <div class="wrap">
+      <p class="eyebrow"><span class="dot claude"></span>Claude Code <span class="dot codex"></span>Codex</p>
+      <h1>See what your coding agents did, <em>folder by folder.</em></h1>
+      <p class="lede">trail finds the session logs your agents leave on your machine, files each one under the project it ran in, and shows the transcript next to the changes it made.</p>
+      <div class="cta">
+        <a class="btn primary" href="https://github.com/veluribharath/trail/releases/latest">Download for macOS &amp; Linux</a>
+        <div class="cmd" data-copy="go install github.com/veluribharath/trail@latest">
+          <code><span class="prompt">$</span> go install github.com/veluribharath/trail@latest</code>
+          <button class="copy" type="button" aria-label="Copy install command">Copy</button>
+        </div>
+      </div>
+      <p class="fine">One static binary. Read-only. Nothing leaves your machine.</p>
+    </div>
+    <div class="wrap wide">
+      <figure class="shot">
+        <img src="screenshot.png" width="2880" height="1800" alt="trail showing a Claude Code session: the trace strip under the header, the transcript as a trail of steps on the left, and the diffs it made on the right">
+      </figure>
+    </div>
+  </section>
+
+  <section class="trace-demo" aria-labelledby="trace-h">
+    <div class="wrap">
+      <div class="split">
+        <div>
+          <h2 id="trace-h">Every session starts with a trace.</h2>
+          <p>One tick per step: prompts tall, edits amber, failures red. You can read the shape of a session before you read a word of it, then drag across the strip to move through the transcript.</p>
+          <p class="hint">Try it: drag across the strip, or focus it and use the arrow keys.</p>
+        </div>
+        <div class="demo">
+          <div class="demo-head">
+            <strong>Fix cart total rounding</strong>
+            <span class="muted">4 min · 2 prompts · 8 tool calls · <b class="blaze">4 edits</b> in 3 files</span>
+          </div>
+          <div class="strip" id="strip" role="slider" tabindex="0" aria-label="Session steps" aria-valuemin="1" aria-valuemax="12" aria-valuenow="1"></div>
+          <div class="legend">
+            <span><i class="t prompt"></i>Prompt</span>
+            <span><i class="t tool"></i>Tool call</span>
+            <span><i class="t edit"></i>Edit</span>
+            <span><i class="t fail"></i>Failed</span>
+          </div>
+          <div class="step" id="step" aria-live="polite"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="features" class="features" aria-labelledby="feat-h">
+    <div class="wrap">
+      <h2 id="feat-h" class="section-title">Everything an agent did, in one place.</h2>
+      <div class="grid">
+        <article class="card">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5V18a1.5 1.5 0 0 0 1.5 1.5h15A1.5 1.5 0 0 0 21 18V9a1.5 1.5 0 0 0-1.5-1.5H12L10 5H4.5A1.5 1.5 0 0 0 3 6.5z"/></svg>
+          <h3>Filed by folder</h3>
+          <p>Sessions are grouped under the git repository they ran in. A session in a linked worktree lands under the main repo, labelled with its worktree and branch.</p>
+        </article>
+        <article class="card">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h7v14H4zM13 5h7v14h-7zM8 9h-.01M17 10l-2 2 2 2"/></svg>
+          <h3>Transcript beside its diffs</h3>
+          <p>Click an edit in the transcript to jump to its diff. Click a diff to jump back to the step that made it. Each diff is the exact before and after the agent sent.</p>
+        </article>
+        <article class="card">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 8v8M8 6h4a4 4 0 0 1 4 4v0"/></svg>
+          <h3>Commits that landed</h3>
+          <p>The Commits tab lists what reached git while the session ran, from 10 minutes before to 2 hours after, with the commits that touch the agent's files first.</p>
+        </article>
+        <article class="card">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h3l2-6 4 12 2-6h5"/></svg>
+          <h3>Read a session at a glance</h3>
+          <p>Switch between every step, just the conversation, or only edits and failures. File totals show how much each file changed.</p>
+        </article>
+        <article class="card">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></svg>
+          <h3>Pick up where it left off</h3>
+          <p>Copy the resume command for any session and continue it in Claude Code or Codex.</p>
+        </article>
+        <article class="card">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"/></svg>
+          <h3>Keyboard first</h3>
+          <p>Jump anywhere without reaching for the mouse.</p>
+          <dl class="keys">
+            <div><dt><kbd>⌘</kbd><kbd>K</kbd></dt><dd>Jump to any session</dd></div>
+            <div><dt><kbd>/</kbd></dt><dd>Filter the sidebar</dd></div>
+            <div><dt><kbd>j</kbd><kbd>k</kbd></dt><dd>Next and previous session</dd></div>
+            <div><dt><kbd>←</kbd><kbd>→</kbd></dt><dd>Step along the trace</dd></div>
+          </dl>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="private" aria-labelledby="priv-h">
+    <div class="wrap split">
+      <div>
+        <h2 id="priv-h">Your transcripts stay yours.</h2>
+        <p>Session logs hold prompts, file contents, command output and often secrets. trail is built so none of that goes anywhere.</p>
+      </div>
+      <ul class="checks">
+        <li><b>Read-only.</b> It reads agent storage and never writes to it.</li>
+        <li><b>Offline.</b> The UI is embedded in the binary, fonts included. Nothing loads from the network.</li>
+        <li><b>Local.</b> It listens on 127.0.0.1 by default and only runs <code>git</code> on your machine.</li>
+        <li><b>No dependencies.</b> One static Go binary, built from the standard library.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="agents" class="agents" aria-labelledby="agents-h">
+    <div class="wrap">
+      <h2 id="agents-h" class="section-title">Works with the agents you already use.</h2>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>Agent</th><th>Reads from</th><th>Edits shown as diffs</th></tr></thead>
+          <tbody>
+            <tr><td><span class="dot claude"></span>Claude Code</td><td><code>~/.claude/projects/&lt;folder&gt;/&lt;id&gt;.jsonl</code></td><td><code>Edit</code>, <code>MultiEdit</code>, <code>Write</code></td></tr>
+            <tr><td><span class="dot codex"></span>Codex</td><td><code>~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl</code></td><td><code>apply_patch</code>, direct or through the shell</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="note">Coming later: OpenCode, Gemini CLI, Kiro and pi. Adding an agent means implementing a four-method <code>Provider</code>; see <a href="https://github.com/veluribharath/trail/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a>.</p>
+    </div>
+  </section>
+
+  <section id="install" class="install" aria-labelledby="install-h">
+    <div class="wrap">
+      <h2 id="install-h" class="section-title">Up and running in a minute.</h2>
+      <div class="grid three">
+        <div class="card">
+          <h3>Download a release</h3>
+          <p>Builds for macOS (Apple Silicon and Intel) and Linux (x86_64 and ARM64) on the <a href="https://github.com/veluribharath/trail/releases/latest">Releases page</a>.</p>
+          <pre data-copy="tar -xzf trail_*_darwin_arm64.tar.gz
+xattr -d com.apple.quarantine ./trail
+./trail -open"><code>tar -xzf trail_*_darwin_arm64.tar.gz
+xattr -d com.apple.quarantine ./trail  <span class="c"># macOS</span>
+./trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</button></pre>
+        </div>
+        <div class="card">
+          <h3>With Go 1.24+</h3>
+          <p>Installs the latest tagged version into your Go bin directory.</p>
+          <pre data-copy="go install github.com/veluribharath/trail@latest
+trail -open"><code>go install github.com/veluribharath/trail@latest
+trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</button></pre>
+        </div>
+        <div class="card">
+          <h3>From source</h3>
+          <p>No build step for the UI; it's embedded at compile time.</p>
+          <pre data-copy="git clone https://github.com/veluribharath/trail && cd trail
+make build && ./trail -open"><code>git clone https://github.com/veluribharath/trail &amp;&amp; cd trail
+make build &amp;&amp; ./trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</button></pre>
+        </div>
+      </div>
+
+      <div class="usage">
+        <div>
+          <h3>Run it</h3>
+          <pre><code>./trail          <span class="c"># http://127.0.0.1:7878</span>
+./trail -open    <span class="c"># and open the browser</span>
+./trail -list    <span class="c"># print sessions by folder and exit</span></code></pre>
+          <p class="note">On a remote dev box, run <code>./trail -host 0.0.0.0</code> on a network you trust, or tunnel the port over SSH.</p>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Flag</th><th>Default</th></tr></thead>
+            <tbody>
+              <tr><td><code>-host</code></td><td><code>127.0.0.1</code></td></tr>
+              <tr><td><code>-port</code></td><td><code>7878</code></td></tr>
+              <tr><td><code>-claude-dir</code></td><td><code>$CLAUDE_CONFIG_DIR</code> or <code>~/.claude</code></td></tr>
+              <tr><td><code>-codex-dir</code></td><td><code>$CODEX_HOME</code> or <code>~/.codex</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="foot">
+  <div class="wrap foot-in">
+    <span>trail is <a href="https://github.com/veluribharath/trail/blob/main/LICENSE">MIT licensed</a>. Instrument Sans and IBM Plex Mono are under the SIL Open Font License.</span>
+    <span><a href="https://github.com/veluribharath/trail">Source</a> · <a href="https://github.com/veluribharath/trail/issues">Issues</a> · <a href="https://github.com/veluribharath/trail/blob/main/SECURITY.md">Security</a></span>
+  </div>
+</footer>
+
+<script src="site.js"></script>
+</body>
+</html>
