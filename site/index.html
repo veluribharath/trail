@@ -6,7 +6,7 @@
 <title>trail · see what your coding agents did</title>
 <meta name="description" content="trail finds the session logs Claude Code and Codex leave on your machine, files each session under its project, and shows the transcript next to the changes it made.">
 <meta property="og:title" content="trail">
-<meta property="og:description" content="See what your coding agents did, folder by folder.">
+<meta property="og:description" content="See what your coding agents did, project by project.">
 <meta property="og:image" content="screenshot.png">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='4' fill='%230E1320'/%3E%3Cpath d='M3.5 12c2.5 0 2-4 4.5-4s2-4 4.5-4' fill='none' stroke='%23F2B544' stroke-width='1.8' stroke-linecap='round' stroke-dasharray='0.1 3'/%3E%3Ccircle cx='12.5' cy='4' r='1.6' fill='%23F2B544'/%3E%3C/svg%3E">
 <link rel="preload" href="fonts/instrument-sans.woff2" as="font" type="font/woff2" crossorigin>
@@ -37,8 +37,9 @@
   <section class="hero">
     <div class="wrap">
       <p class="eyebrow"><span class="dot claude"></span>Claude Code <span class="dot codex"></span>Codex</p>
-      <h1>See what your coding agents did, <em>folder by folder.</em></h1>
+      <h1>See what your coding agents did, <em>project by project.</em></h1>
       <p class="lede">trail finds the session logs your agents leave on your machine, files each one under the project it ran in, and shows the transcript next to the changes it made.</p>
+      <p class="clarify">Each project is the folder a session ran in: its git repository, or the folder itself when it isn't one.</p>
       <div class="cta">
         <a class="btn primary" href="https://github.com/veluribharath/trail/releases/latest">Download for macOS &amp; Linux</a>
         <div class="cmd" data-copy="go install github.com/veluribharath/trail@latest">
