@@ -269,8 +269,8 @@ func printCompare(w io.Writer, ta, tb *Transcript, c *Comparison) {
 	if c.A.Usage != nil || c.B.Usage != nil {
 		ua, ub := orZero(c.A.Usage), orZero(c.B.Usage)
 		ta, tb := ua.Prompt()+ua.Output, ub.Prompt()+ub.Output
-		row("tokens", fmtTok(ta), fmtTok(tb), sign(tb-ta)+fmtTok(abs64(tb-ta)))
-		row("API-equivalent cost", costText(ua), costText(ub), fmt.Sprintf("%+.2f", ub.Cost-ua.Cost))
+		row("tokens", tokensHuman(ta), tokensHuman(tb), sign(tb-ta)+tokensHuman(abs64(tb-ta)))
+		row("API-equivalent cost", costCell(ua), costCell(ub), fmt.Sprintf("%+.2f", ub.Cost-ua.Cost))
 	}
 	tw.Flush()
 
@@ -310,7 +310,8 @@ func orZero(u *Usage) Usage {
 	return *u
 }
 
-func costText(u Usage) string {
+// costCell is a cost short enough for a table cell.
+func costCell(u Usage) string {
 	if u.Unpriced > 0 && u.Cost == 0 {
 		return "—"
 	}
@@ -355,14 +356,4 @@ func fmtDur(ms int64) string {
 		return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
 	}
 	return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
-}
-
-func fmtTok(n int64) string {
-	switch {
-	case n < 1000:
-		return fmt.Sprint(n)
-	case n < 1e6:
-		return fmt.Sprintf("%.1fK", float64(n)/1e3)
-	}
-	return fmt.Sprintf("%.1fM", float64(n)/1e6)
 }
