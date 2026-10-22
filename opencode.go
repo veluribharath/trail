@@ -23,9 +23,10 @@ import (
 type opencodeProvider struct {
 	dir string
 
-	mu     sync.Mutex
-	snap   *opencodeSnap
-	stamps map[string]string // path -> stamp, from the last Discover
+	mu       sync.Mutex
+	snap     *opencodeSnap
+	stamps   map[string]string // path -> stamp, from the last Discover
+	stampsDB *sqliteDB         // the snapshot stamps were read from
 }
 
 // opencodeSnap is one open, consistent view of the database. A new one is
@@ -116,8 +117,7 @@ func (p *opencodeProvider) Discover() ([]string, error) {
 	parent := map[string]string{}
 	err = sessions.Scan(func(r sqliteRow) error {
 		id := r.Str("id")
-		own[id] = fmt.Sprintf("%d/%d/%g/%d/%d/%s", r.Int("time_updated"), parts[id], r.Float("cost"),
-			r.Int("tokens_input"), r.Int("tokens_output"), r.Str("title"))
+		own[id] = opencodeOwnStamp(r, parts[id])
 		if pid := r.Str("parent_id"); pid != "" {
 			parent[id] = pid
 		}
@@ -149,16 +149,79 @@ func (p *opencodeProvider) Discover() ([]string, error) {
 		}
 	}
 	p.mu.Lock()
-	p.stamps = stamps
+	p.stamps, p.stampsDB = stamps, db
 	p.mu.Unlock()
 	return out, nil
 }
 
+// opencodeOwnStamp is one session row's part of a stamp.
+func opencodeOwnStamp(r sqliteRow, parts int) string {
+	return fmt.Sprintf("%d/%d/%g/%d/%d/%s", r.Int("time_updated"), parts, r.Float("cost"),
+		r.Int("tokens_input"), r.Int("tokens_output"), r.Str("title"))
+}
+
+// Stamp returns the stamp Discover computed, while the database hasn't
+// changed since. Live updates ask between scans, so after a change it is
+// worked out for this one session through the indexes, the same way.
 func (p *opencodeProvider) Stamp(path string) (string, bool) {
+	db, release, err := p.acquire()
+	if err != nil {
+		return "", false
+	}
+	defer release()
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	s, ok := p.stamps[path]
-	return s, ok
+	if db == p.stampsDB {
+		s, ok := p.stamps[path]
+		p.mu.Unlock()
+		return s, ok
+	}
+	p.mu.Unlock()
+
+	i := strings.LastIndex(path, "#")
+	sessions, partRoot := db.Table("session"), db.indexOn("part", "session_id")
+	if i < 0 || sessions == nil || partRoot == 0 {
+		return "", false
+	}
+	// The session and its subagents, in the same sorted order as Discover.
+	rows := map[string]sqliteRow{}
+	queue := []string{path[i+1:]}
+	for depth := 0; len(queue) > 0 && depth < 16; depth++ {
+		var next []string
+		for _, id := range queue {
+			found, err := sessions.Lookup("id", id)
+			if err != nil || len(found) == 0 {
+				if depth == 0 {
+					return "", false
+				}
+				continue
+			}
+			rows[id] = found[0]
+			children, err := sessions.Lookup("parent_id", id)
+			if err != nil {
+				return "", false
+			}
+			for _, c := range children {
+				if _, seen := rows[c.Str("id")]; !seen {
+					next = append(next, c.Str("id"))
+				}
+			}
+		}
+		queue = next
+	}
+	ids := make([]string, 0, len(rows))
+	for id := range rows {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	stamp := ""
+	for _, id := range ids {
+		n, err := db.indexRowids(partRoot, id)
+		if err != nil {
+			return "", false
+		}
+		stamp += opencodeOwnStamp(rows[id], len(n)) + ";"
+	}
+	return stamp, true
 }
 
 type opencodeMessage struct {

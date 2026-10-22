@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -237,7 +238,13 @@ func (x *Index) Load(key string) (*Transcript, error) {
 					t.Size = int64(len(b))
 				}
 			} else {
+				// Read the stamp first: if the session changes during the
+				// parse, the next live poll sees a newer stamp and reloads.
+				stamp, _ := sessionStamp(p, s.Path)
 				t, err = p.Parse(s.Path, true)
+				if t != nil {
+					t.Size = stampToken(stamp)
+				}
 			}
 			if t != nil {
 				t.Session.Key, t.Session.Root, t.Session.Worktree = s.Key, s.Root, s.Worktree
@@ -249,6 +256,25 @@ func (x *Index) Load(key string) (*Transcript, error) {
 		}
 	}
 	return nil, os.ErrNotExist
+}
+
+// Stamp returns the current stamp of an indexed session, read now rather
+// than at the last scan. ok is false once the session is gone.
+func (x *Index) Stamp(s *Session) (string, bool) {
+	for _, p := range x.providers {
+		if p.Name() == s.Provider {
+			return sessionStamp(p, s.Path)
+		}
+	}
+	return "", false
+}
+
+// stampToken folds a stamp into Transcript.Size for sessions that aren't
+// line files, so live updates can tell versions apart the same way.
+func stampToken(stamp string) int64 {
+	h := fnv.New64a()
+	h.Write([]byte(stamp))
+	return int64(h.Sum64() >> 1)
 }
 
 // repoRoot files a cwd under its git repository. A linked worktree is filed

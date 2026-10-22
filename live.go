@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"os"
 	"reflect"
 	"strconv"
 	"time"
@@ -13,11 +12,13 @@ import (
 // Live tailing. While an agent is still writing a session, the viewer keeps a
 // Server-Sent Events stream open and the server sends what changed.
 //
-// Both agents only ever append whole JSON lines to the session file, and lock
-// a separate file (if any) to keep two writers off one session, so reading it
-// can't disturb the agent. The file is only stat'ed between reads and re-read
-// whole with readComplete, which closes it straight away: on Windows a held
-// handle would stop the agent from renaming or deleting the file.
+// Claude Code and Codex only ever append whole JSON lines to the session file,
+// and lock a separate file (if any) to keep two writers off one session, so
+// reading it can't disturb the agent. The file is only stat'ed between reads
+// and re-read whole with readComplete, which closes it straight away: on
+// Windows a held handle would stop the agent from renaming or deleting the
+// file. OpenCode sessions are polled by their stamp instead, and read through
+// the same read-only database snapshot as everything else.
 
 var (
 	livePoll = time.Second
@@ -78,8 +79,7 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var lastSize int64 = -1
-	var lastMod time.Time
+	last := ""
 	grew := time.Now()
 	wait := livePoll
 	for {
@@ -88,19 +88,21 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-time.After(wait):
 		}
-		fi, err := os.Stat(sess.Path)
-		if err != nil {
+		// The file's size and mtime, or the provider's own stamp for
+		// sessions kept in a database (OpenCode).
+		stamp, ok := s.index.Stamp(sess)
+		if !ok {
 			send("gone", nil)
 			return
 		}
-		if fi.Size() == lastSize && fi.ModTime().Equal(lastMod) {
+		if stamp == last {
 			if time.Since(grew) > liveIdle {
 				send("idle", nil)
 				return
 			}
 			continue
 		}
-		lastSize, lastMod = fi.Size(), fi.ModTime()
+		last = stamp
 
 		start := time.Now()
 		t, err := s.index.Load(key)
@@ -112,7 +114,7 @@ func (s *Server) handleLive(w http.ResponseWriter, r *http.Request) {
 		// can't keep trail parsing flat out.
 		wait = max(livePoll, 4*time.Since(start))
 		if t.Size == prev.Size {
-			continue // only a partial line so far
+			continue // only a partial line so far, or nothing new
 		}
 		grew = time.Now()
 		if !send("update", diffTranscripts(prev, t)) {

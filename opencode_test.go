@@ -1,10 +1,16 @@
 package main
 
 import (
+	"bufio"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The fixture is built by testdata/opencode/gen.py: two sessions and a
@@ -206,5 +212,80 @@ func copyFile(t *testing.T, src, dst string) {
 	}
 	if err := os.WriteFile(dst, b, 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestOpenCodeStampBetweenScans(t *testing.T) {
+	// Between scans, Stamp works a session's stamp out on its own; it must
+	// match what Discover computed for the same data.
+	p := &opencodeProvider{dir: "testdata/opencode"}
+	paths, _ := p.Discover()
+	for _, path := range paths {
+		want, _ := p.Stamp(path)
+		p.mu.Lock()
+		p.stampsDB = nil
+		p.mu.Unlock()
+		if got, ok := p.Stamp(path); !ok || got != want {
+			t.Errorf("%s: fresh stamp %q, Discover's %q", path, got, want)
+		}
+		p.Discover()
+	}
+	p.stampsDB = nil
+	if _, ok := p.Stamp(p.dbPath() + "#ses_nope"); ok {
+		t.Error("a missing session has no stamp")
+	}
+}
+
+func TestOpenCodeLive(t *testing.T) {
+	defer func(p, i time.Duration) { livePoll, liveIdle = p, i }(livePoll, liveIdle)
+	livePoll, liveIdle = 10*time.Millisecond, time.Minute
+
+	dir := t.TempDir()
+	copyFile(t, "testdata/opencode/opencode.db", filepath.Join(dir, "opencode.db"))
+	idx := NewIndex(&opencodeProvider{dir: dir})
+	idx.Scan(0)
+	before, err := idx.Load("opencode:ses_o1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer((&Server{index: idx}).Handler())
+	defer srv.Close()
+	resp, err := http.Get(fmt.Sprintf("%s/api/live?id=opencode:ses_o1&size=%d", srv.URL, before.Size))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	rd := bufio.NewReader(resp.Body)
+	next := func() (string, liveUpdate) {
+		var event string
+		var u liveUpdate
+		for {
+			ln, err := rd.ReadString('\n')
+			if err != nil {
+				t.Fatalf("stream ended: %v", err)
+			}
+			switch {
+			case strings.HasPrefix(ln, "event: "):
+				event = strings.TrimSpace(ln[7:])
+			case strings.HasPrefix(ln, "data: "):
+				json.Unmarshal([]byte(ln[6:]), &u)
+			case ln == "\n":
+				return event, u
+			}
+		}
+	}
+	if ev, _ := next(); ev != "ready" {
+		t.Fatalf("an up-to-date viewer should get ready first, got %q", ev)
+	}
+	// OpenCode commits the next turn: it shows up in the WAL.
+	copyFile(t, "testdata/opencode/opencode.db-wal", filepath.Join(dir, "opencode.db-wal"))
+	ev, u := next()
+	if ev != "update" || u.From != len(before.Events) || len(u.Events) != 2 || u.Session.Title != "Honour ?next on login" {
+		t.Fatalf("update: %q from=%d events=%d session=%+v", ev, u.From, len(u.Events), u.Session)
+	}
+	os.Remove(filepath.Join(dir, "opencode.db"))
+	os.Remove(filepath.Join(dir, "opencode.db-wal"))
+	if ev, _ := next(); ev != "gone" {
+		t.Errorf("deleted database: got %q, want gone", ev)
 	}
 }

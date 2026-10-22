@@ -81,7 +81,8 @@ type Transcript struct {
 	Events  []Event      `json:"events"`
 	Changes []FileChange `json:"changes"`
 	// Size is how many bytes of the session file were read: every complete
-	// line at the time. Live updates continue from it.
+	// line at the time. Live updates continue from it. For sessions that
+	// aren't line files it is a token of the session's stamp instead.
 	Size int64 `json:"size"`
 }
 
