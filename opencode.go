@@ -233,8 +233,29 @@ type opencodeMessage struct {
 		Created   int64 `json:"created"`
 		Completed int64 `json:"completed"`
 	} `json:"time"`
+	Cost    float64         `json:"cost"`
+	Tokens  *opencodeTokens `json:"tokens"`
 	created int64
 	parts   []opencodePart
+}
+
+// opencodeTokens is how OpenCode records a step's usage: input excludes cache
+// reads and writes, and reasoning is counted apart from output.
+type opencodeTokens struct {
+	Input     int64 `json:"input"`
+	Output    int64 `json:"output"`
+	Reasoning int64 `json:"reasoning"`
+	Cache     struct {
+		Read  int64 `json:"read"`
+		Write int64 `json:"write"`
+	} `json:"cache"`
+}
+
+func (o *opencodeTokens) step(model string, cost float64) step {
+	st := step{model: model, recorded: cost}
+	st.Input, st.CacheRead, st.CacheWrite = o.Input, o.Cache.Read, o.Cache.Write
+	st.Output, st.Reasoning = o.Output+o.Reasoning, o.Reasoning
+	return st
 }
 
 type opencodePart struct {
@@ -244,7 +265,10 @@ type opencodePart struct {
 	Synthetic bool   `json:"synthetic"`
 	Ignored   bool   `json:"ignored"`
 	Tool      string `json:"tool"`
-	Time      struct {
+	// step-finish
+	Cost   float64         `json:"cost"`
+	Tokens *opencodeTokens `json:"tokens"`
+	Time   struct {
 		Start int64 `json:"start"`
 	} `json:"time"`
 	State struct {
@@ -347,6 +371,12 @@ func (p *opencodeProvider) addSession(db *sqliteDB, t *Transcript, id string, fu
 		if m.Role != "assistant" {
 			continue
 		}
+		// Usage goes on the turn's last own event, not on the steps of a
+		// subagent the turn started.
+		steps, mine := 0, -1
+		if full {
+			mine = len(t.Events) - 1
+		}
 		for _, pt := range m.parts {
 			pts := ts
 			if pt.Time.Start > 0 {
@@ -361,10 +391,19 @@ func (p *opencodeProvider) addSession(db *sqliteDB, t *Transcript, id string, fu
 				s.Messages++
 				if full {
 					t.Events = append(t.Events, Event{Kind: "assistant", Time: pts, Text: text, Sidechain: side})
+					mine = len(t.Events) - 1
 				}
 			case "reasoning":
 				if full && strings.TrimSpace(pt.Text) != "" {
 					t.Events = append(t.Events, Event{Kind: "thinking", Time: pts, Text: pt.Text, Sidechain: side})
+					mine = len(t.Events) - 1
+				}
+			case "step-finish":
+				// Each model request in a turn ends with one, carrying its
+				// usage and the cost OpenCode worked out for it.
+				if pt.Tokens != nil {
+					steps++
+					t.addUsage(pt.Tokens.step(m.ModelID, pt.Cost), mine)
 				}
 			case "tool":
 				st := pt.State
@@ -390,6 +429,7 @@ func (p *opencodeProvider) addSession(db *sqliteDB, t *Transcript, id string, fu
 					}
 					t.Events = append(t.Events, ev)
 					idx = len(t.Events) - 1
+					mine = idx
 				}
 				for _, c := range changes {
 					c.Time = pts
@@ -401,6 +441,10 @@ func (p *opencodeProvider) addSession(db *sqliteDB, t *Transcript, id string, fu
 					}
 				}
 			}
+		}
+		// Messages written before step parts existed carry the turn's total.
+		if steps == 0 && m.Tokens != nil {
+			t.addUsage(m.Tokens.step(m.ModelID, m.Cost), mine)
 		}
 	}
 	return nil
