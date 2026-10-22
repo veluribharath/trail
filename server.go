@@ -35,6 +35,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/export", s.handleExport)
 	mux.HandleFunc("GET /api/blame", s.handleBlame)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
+	mux.HandleFunc("GET /api/ping", s.handlePing)
 	sub, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", noCache(http.FileServer(http.FS(sub))))
 	return securityHeaders(mux)
@@ -94,7 +95,7 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b bytes.Buffer
-	if err := ExportHTML(r.Context(), &b, t, s.home, s.version); err != nil {
+	if err := ExportHTML(r.Context(), &b, t, s.home, s.version, false); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -102,6 +103,12 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="`+exportName(t.Session)+`"`)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(b.Bytes())
+}
+
+// handlePing lets trail -mcp check that a window it found is trail, reading
+// the same agent folders, before it searches through it.
+func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"app": "trail", "version": s.version, "sources": s.index.Sources()})
 }
 
 // handleStats aggregates sessions by project, file, tool and agent. Tool and

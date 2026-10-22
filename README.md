@@ -51,6 +51,7 @@ make build
 ./trail -prices    # print the token prices used for costs, and exit
 ./trail -export c1 -o session.html   # write one session as an offline page, and exit
 ./trail -stats 30   # print the last 30 days in numbers (or -stats all), and exit
+./trail -mcp       # an MCP server on stdio, so your agent can search past sessions
 ```
 
 On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop. Transcripts often contain secrets, so only do this on a network you trust (or tunnel the port over SSH instead).
@@ -69,8 +70,9 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | `-embed-url` | `http://127.0.0.1:11434` (Ollama) |
 | `-embed-model` | `nomic-embed-text` |
 | `-prices` | print the price table and exit |
-| `-export`, `-o` | off; see [Export a session](#export-a-session) |
+| `-export`, `-o`, `-redact` | off; see [Export a session](#export-a-session) |
 | `-stats` | off; a number of days, or `all`; see [Stats](#stats) |
+| `-mcp` | off; see [Let your agent search past sessions](#let-your-agent-search-past-sessions-mcp) |
 
 ## What it reads
 
@@ -190,7 +192,31 @@ In the browser, open a session and choose Export, then Download HTML; your brows
 
 `trail -list` prints session ids. trail writes the file you name and nothing else; it's created readable only by you.
 
-Transcripts can contain secrets: API keys, tokens, environment variables, file contents and command output. Read the file before you share it. The file itself can't make any network request: its content security policy blocks everything but its own inlined script, styles and fonts, so opening it never loads or sends anything. Commits made in the session's window that don't touch its files are left out.
+Transcripts can contain secrets: API keys, tokens, environment variables, file contents and command output. Add `-redact` to replace the ones trail recognises with `[redacted]` in the transcript, commit messages and patches (cloud provider keys, GitHub, GitLab, Slack, Stripe and model-provider tokens, JWTs, private keys, passwords in URLs, and values assigned to names like `password`, `secret` or `api_key`). It's pattern matching, so read the file before you share it either way. The file itself can't make any network request: its content security policy blocks everything but its own inlined script, styles and fonts, so opening it never loads or sends anything. Commits made in the session's window that don't touch its files are left out.
+
+## Let your agent search past sessions (MCP)
+
+`trail -mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on standard input and output. Register it once and your agent can look through every past session on this machine: how a bug was fixed before, why a file changed, what was tried and failed.
+
+```
+claude mcp add trail -- trail -mcp          # Claude Code
+codex mcp add trail -- trail -mcp           # Codex
+gemini mcp add trail trail -mcp             # Gemini CLI
+```
+
+Other clients take the same command in their MCP config: `{"command": "trail", "args": ["-mcp"]}`. Add the same `-claude-dir`-style flags you run trail with if your agent folders aren't in the default places, and `-semantic` to blend in meaning search.
+
+It offers three read-only tools:
+
+| Tool | What it does |
+| --- | --- |
+| `search_sessions` | Full-text search with the same syntax as the UI (`"phrases"`, `in:`, `tool:`, `file:`, `agent:`), optionally limited to a project (`"."` is the folder the agent runs in). Returns sessions with their best matching steps. |
+| `list_sessions` | Recent sessions, optionally for one project or agent. |
+| `get_session` | One session's transcript, a page of steps at a time, with long text shortened unless asked. |
+
+Nothing runs in the background. The agent starts `trail -mcp` with each session, and trail reads nothing until the first tool call. Then, if a trail window is open on this machine over the same agent folders, trail asks it, so nothing is rebuilt; otherwise it builds its own index, which takes a few seconds on a large history. A window writes its address to `ui.json` in trail's cache directory while it runs, and only a window on 127.0.0.1 is used.
+
+Whatever the agent reads goes to its model provider, so every result is redacted the same way as `-export -redact`. Redaction is pattern matching: it catches the usual shapes of keys and tokens, not every secret a transcript can hold.
 
 ## Stats
 
@@ -230,6 +256,8 @@ git.go       commits in the session window
 blame.go     trail blame: lines of a file back to the session steps that wrote them
 server.go    JSON API and embedded UI
 export.go    one session as a self-contained HTML file
+redact.go    secret redaction for exports and MCP results
+mcp.go       trail -mcp: the MCP server and its tools
 live.go      live updates for a session that is still being written
 usage.go     token counts per response and session
 prices.go    pricing, with the bundled prices.json and overrides

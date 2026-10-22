@@ -205,6 +205,16 @@ func (x *Index) Sessions() []*Session {
 	return out
 }
 
+// Sources names each provider with the folder it reads, so two trail
+// processes can tell whether they are looking at the same sessions.
+func (x *Index) Sources() []string {
+	out := make([]string, len(x.providers))
+	for i, p := range x.providers {
+		out[i] = p.Name() + "=" + p.Root()
+	}
+	return out
+}
+
 // Get returns a copy of one indexed session, or nil.
 func (x *Index) Get(key string) *Session {
 	x.mu.Lock()
