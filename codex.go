@@ -114,7 +114,16 @@ type codexItem struct {
 	Timestamp string `json:"timestamp"`
 }
 
-func (p *codexProvider) Parse(f io.Reader, path string, full bool) (*Transcript, error) {
+func (p *codexProvider) Parse(path string, full bool) (*Transcript, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return p.ParseLines(f, path, full)
+}
+
+func (p *codexProvider) ParseLines(f io.Reader, path string, full bool) (*Transcript, error) {
 
 	t := &Transcript{Session: &Session{Provider: "codex", Path: path}}
 	s := t.Session

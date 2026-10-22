@@ -84,7 +84,16 @@ type claudeBlock struct {
 	IsError   bool            `json:"is_error"`
 }
 
-func (p *claudeProvider) Parse(f io.Reader, path string, full bool) (*Transcript, error) {
+func (p *claudeProvider) Parse(path string, full bool) (*Transcript, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return p.ParseLines(f, path, full)
+}
+
+func (p *claudeProvider) ParseLines(f io.Reader, path string, full bool) (*Transcript, error) {
 
 	id := strings.TrimSuffix(filepath.Base(path), ".jsonl")
 	t := &Transcript{Session: &Session{ID: id, Provider: "claude", Path: path}}

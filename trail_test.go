@@ -23,7 +23,7 @@ func TestClaudeParse(t *testing.T) {
 	}
 	c1 := filepath.Join("testdata/claude/projects/-work-shop/c1.jsonl")
 	paths = []string{c1}
-	tr, err := parseFile(p, paths[0], true)
+	tr, err := p.Parse(paths[0], true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestClaudeParse(t *testing.T) {
 	}
 
 	// Summary mode must agree with full mode on the counts the tree shows.
-	sum, _ := parseFile(p, paths[0], false)
+	sum, _ := p.Parse(paths[0], false)
 	if sum.Session.Edits != s.Edits || sum.Session.Messages != s.Messages || len(sum.Events) != 0 {
 		t.Errorf("summary parse disagrees: %+v", sum.Session)
 	}
@@ -78,7 +78,7 @@ func TestSessionNames(t *testing.T) {
 		"c3": {"Add dark mode toggle", "generated"},
 	}
 	for id, want := range cases {
-		tr, err := parseFile(cl, "testdata/claude/projects/-work-shop/"+id+".jsonl", false)
+		tr, err := cl.Parse("testdata/claude/projects/-work-shop/"+id+".jsonl", false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -132,7 +132,7 @@ func TestCodexParse(t *testing.T) {
 	}
 	var cur, legacy *Transcript
 	for _, path := range paths {
-		tr, err := parseFile(p, path, true)
+		tr, err := p.Parse(path, true)
 		if err != nil {
 			t.Fatal(err)
 		}
