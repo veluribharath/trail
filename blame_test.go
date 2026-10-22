@@ -165,6 +165,13 @@ func TestBlame(t *testing.T) {
 	if refused["error"] == "" {
 		t.Errorf("a file outside every session folder must be refused: %+v", refused)
 	}
+	refused = nil
+	if os.Symlink(outside, filepath.Join(repo, "link.txt")) == nil {
+		getJSON(t, srv.URL+"/api/blame?path="+filepath.Join(repo, "link.txt"), &refused)
+		if refused["error"] == "" {
+			t.Errorf("a link out of a session folder must be refused: %+v", refused)
+		}
+	}
 }
 
 func TestParseBlameArg(t *testing.T) {

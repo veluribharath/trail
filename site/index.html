@@ -25,6 +25,7 @@
       <span>trail</span>
     </a>
     <nav class="top-nav" aria-label="Sections">
+      <a href="#blame">Blame</a>
       <a href="#features">Features</a>
       <a href="#agents">Agents</a>
       <a href="#install">Install</a>
@@ -78,6 +79,29 @@
           </div>
           <div class="step" id="step" aria-live="polite"></div>
         </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="blame" class="blame-demo" aria-labelledby="blame-h">
+    <div class="wrap split">
+      <div>
+        <p class="kicker">New in this release</p>
+        <h2 id="blame-h">Which session wrote this line?</h2>
+        <p><code>trail blame cart.go:16</code> follows a line through git to the session and step that wrote it, with the prompt that asked for it and the command to resume that session. In the app, “Who wrote this” shows a whole file this way.</p>
+        <p>It works from the logs already on your disk. There are no hooks to install before the agent starts, so sessions from months ago count too, and nothing leaves your machine.</p>
+        <p class="hint">trail matches each line’s text against the edits each session recorded before the line was committed. That way work squashed into one commit, or not committed yet, still finds its session.</p>
+      </div>
+      <div class="demo blame-box" aria-label="Example: trail blame output">
+<pre><code><span class="c">$</span> trail blame cart.go:16
+cart.go:16
+    if pct &lt;= 0 {
+
+<span class="k">commit </span>  5b479a2  Tony, 2026-10-21 15:40  Promo discounts
+<span class="k">session</span>  <span class="dot claude"></span>Claude Code: Add percentage discounts
+<span class="k">step   </span>  #3 of 3, Edit cart.go, 2026-10-21 15:00
+<span class="k">asked  </span>  Add a Discount helper for promo codes
+<span class="k">resume </span>  cd ~/code/shop &amp;&amp; claude --resume 7f3e…</code></pre>
       </div>
     </div>
   </section>
@@ -195,6 +219,7 @@ trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</but
           <pre><code>./trail          <span class="c"># http://127.0.0.1:7878</span>
 ./trail -open    <span class="c"># and open the browser</span>
 ./trail -list    <span class="c"># print sessions by folder and exit</span>
+./trail blame cart.go:16  <span class="c"># the session and step that wrote a line</span>
 ./trail -export c1 -o session.html  <span class="c"># one session as an offline page</span></code></pre>
           <p class="note">On a remote dev box, run <code>./trail -host 0.0.0.0</code> on a network you trust, or tunnel the port over SSH.</p>
         </div>

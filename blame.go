@@ -84,6 +84,7 @@ const (
 	blameMaxBytes   = 8 << 20
 	blameMaxLines   = 50000
 	blameMaxSession = 200 // sessions read per file, newest first
+	blameMaxOthers  = 60  // of those, sessions that didn't edit it
 	blameNear       = 3   // lines either side that can vouch for a short line
 )
 
@@ -343,7 +344,9 @@ func blameEdits(idx *Index, root string, names, bases map[string]bool, res *Blam
 			others = append(others, s.Key)
 		}
 	}
-	keys = append(keys, others...)
+	// Other sessions are read only for shell commands, the weaker match, so
+	// fewer of them.
+	keys = append(keys, others[:min(len(others), blameMaxOthers)]...)
 	if len(keys) > blameMaxSession {
 		keys = keys[:blameMaxSession]
 	}
@@ -451,7 +454,11 @@ func blameSource(e *edit) BlameSource {
 	}
 	if e.ev >= 0 && e.ev < len(t.Events) {
 		ev := t.Events[e.ev]
-		src.Summary = oneLine(firstNonEmpty(ev.Summary, ev.Tool), 120)
+		src.Summary = ev.Tool
+		if ev.Summary != "" && ev.Summary != ev.Tool {
+			src.Summary = strings.TrimSpace(ev.Tool + " " + ev.Summary)
+		}
+		src.Summary = oneLine(src.Summary, 120)
 		for i := e.ev; i >= 0; i-- {
 			if u := t.Events[i]; u.Kind == "user" && !u.Sidechain && strings.TrimSpace(u.Text) != "" {
 				src.Prompt = oneLine(u.Text, promptChars)
@@ -460,15 +467,6 @@ func blameSource(e *edit) BlameSource {
 		}
 	}
 	return src
-}
-
-func firstNonEmpty(v ...string) string {
-	for _, s := range v {
-		if strings.TrimSpace(s) != "" {
-			return s
-		}
-	}
-	return ""
 }
 
 // fileKey names a file the same way whichever checkout it was seen in: its
@@ -644,7 +642,7 @@ func providerName(p string) string {
 	case "gemini":
 		return "Gemini CLI"
 	case "kiro":
-		return "Kiro"
+		return "Kiro CLI"
 	}
 	return p
 }

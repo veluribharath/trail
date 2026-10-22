@@ -4,7 +4,7 @@ See what your coding agents did, folder by folder.
 
 ![trail showing a Claude Code session: the trace strip under the header, the transcript as a trail of steps on the left, and the diffs it made on the right](docs/screenshot.png)
 
-trail finds the sessions that Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first. Any session can be [exported](#export-a-session) as one HTML file to share.
+trail finds the sessions that Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first. Any session can be [exported](#export-a-session) as one HTML file to share. And `trail blame file:line` [tells you which session wrote a line](#who-wrote-this-line), and which step and prompt.
 
 Each session opens with a trace: one tick per step, prompts tall, edits amber, failures red. Drag across it to move through the transcript. Press ⌘K (Ctrl+K) to search: it matches session names, and everything said and run inside every transcript. Pick a match to open the session at that step, with every other matching step marked on the trace; `n` and `Shift+N` step through them. `/` filters the sidebar by name, and `j`/`k` step between sessions.
 
@@ -47,6 +47,7 @@ make build
 ./trail -open      # and open the browser
 ./trail -list      # print sessions by folder and exit
 ./trail -search "flaky login"   # print matching sessions and steps, and exit
+./trail blame cart.go:42        # the session and step that wrote a line, and exit
 ./trail -prices    # print the token prices used for costs, and exit
 ./trail -export c1 -o session.html   # write one session as an offline page, and exit
 ```
@@ -140,6 +141,40 @@ Prices ship inside trail (`prices.json`, dated) and trail never fetches them. `.
 
 Rates are USD per million tokens. A model with no price shows its tokens with the cost as "—", and a total that includes one reads "≥". OpenCode records its own cost for each step, which trail uses for models it has no price for.
 
+## Who wrote this line?
+
+`trail blame` follows lines of a file through git back to the agent session and step that wrote them. It uses only the logs already on your disk, so there are no hooks to install first and sessions from before you installed trail count too.
+
+```
+./trail blame cart.go:16        # one line: commit, session, step, the prompt behind it, resume command
+./trail blame cart.go:10-30     # a range, as runs of lines per session step
+./trail blame cart.go           # the whole file
+```
+
+```
+cart.go:16
+    if pct <= 0 {
+
+commit   5b479a2  Tony, 2026-10-21 15:40  Discounts for promo codes
+session  Claude Code: Add percentage discounts
+id       claude:7f3e0b9c-…
+step     #3 of 3, Edit cart.go, 2026-10-21 15:00
+asked    Add a Discount helper for promo codes
+resume   cd ~/code/shop && claude --resume 7f3e0b9c-…
+```
+
+In the app, every edit in a session's Changes tab has a "Who wrote this" button, and the home page takes any file path (`~/code/shop/cart.go:16`). The view shows the file as it is now, with each run of lines under the session step that wrote it, or the commit when no session did. Click a run to open the session at that step.
+
+How a line is matched:
+
+- `git blame` gives the commit that last brought the line in. trail then looks for edits that introduced exactly that text, recorded by any session that edited the file (under any name it had, so renames are followed) before that commit was made. The latest such edit wins. Commits don't need to map one to one onto sessions: work from several sessions squashed into one commit, or committed hours later, still finds the right step.
+- Lines that aren't committed yet can match any edit. Files outside git work the same way, with every line uncommitted.
+- Short lines such as `}` only match when a neighbouring line from the same commit came from the same edit, and a blank line between two lines from one step belongs to that step.
+- Agents also write files from the shell (a heredoc, `sed -i`, a script). When no edit matches, a shell command that names the file and contains the line is shown as a weaker "probably" match.
+- A line no session's log contains is shown as not from a session. A person wrote it, or the session's log is gone.
+
+The browser view only reads files inside folders your sessions ran in.
+
 ## Export a session
 
 Export saves one session as a single HTML file: the transcript, the trace, every diff, and the commits that touch files the session edited, with their patches. It opens from disk in any browser, with no trail running, and looks like trail without the sidebar. Press `/` to find text in it, and `n` and `Shift+N` to step through the matches.
@@ -176,6 +211,7 @@ index.go     discovery, mtime cache, repo-root grouping
 search.go    full-text index and queries
 semantic.go  opt-in related-session search over a local embedding model
 git.go       commits in the session window
+blame.go     trail blame: lines of a file back to the session steps that wrote them
 server.go    JSON API and embedded UI
 export.go    one session as a self-contained HTML file
 live.go      live updates for a session that is still being written

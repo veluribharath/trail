@@ -146,7 +146,13 @@ func (s *Server) handleBlame(w http.ResponseWriter, r *http.Request) {
 		}
 		p = filepath.Join(sess.Cwd, p)
 	}
-	p = realPath(filepath.Clean(p))
+	// Resolve the file itself too: a link inside a session folder must not
+	// lead to a file outside every one.
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	} else {
+		p = realPath(filepath.Clean(p))
+	}
 	if !s.underSession(p) {
 		fail(w, http.StatusForbidden, "trail only reads files inside folders your sessions ran in.")
 		return
