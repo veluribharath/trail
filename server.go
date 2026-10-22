@@ -39,6 +39,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/export", s.handleExport)
 	mux.HandleFunc("GET /api/retro", s.handleRetro)
+	mux.HandleFunc("GET /api/compare", s.handleCompare)
 	mux.HandleFunc("PUT /api/notes", s.handleSetNotes)
 	mux.HandleFunc("GET /api/blame", s.handleBlame)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
@@ -161,6 +162,20 @@ func (s *Server) handleRetro(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, res)
+}
+
+// handleCompare sends two sessions' transcripts with the comparison of them.
+func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
+	var ts [2]*Transcript
+	for i, k := range []string{"a", "b"} {
+		t, err := s.index.Load(r.URL.Query().Get(k))
+		if err != nil {
+			fail(w, http.StatusNotFound, "One of these sessions is no longer on disk. Refresh the list.")
+			return
+		}
+		ts[i] = t
+	}
+	writeJSON(w, map[string]any{"a": ts[0], "b": ts[1], "compare": Compare(ts[0], ts[1])})
 }
 
 // handlePing lets trail -mcp check that a window it found is trail, reading

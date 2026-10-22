@@ -58,12 +58,13 @@ func main() {
 	export := flag.String("export", "", "write one session (id, provider:id, or id prefix) as a single offline HTML file and exit")
 	out := flag.String("o", "", "file for -export to write; without it the page goes to standard output")
 	retro := flag.String("retro", "", "print suggested CLAUDE.md or AGENTS.md rules from a project's sessions (a folder, or . for this one) and exit")
+	compare := flag.String("compare", "", "compare two sessions: trail -compare A B, each an id, provider:id, or id prefix; prints a table and exits")
 	noNotes := flag.Bool("no-notes", false, "leave your notes and bookmarks out of -export")
 	redact := flag.Bool("redact", false, "hide keys, tokens and passwords in the -export file")
 	mcp := flag.Bool("mcp", false, "serve the Model Context Protocol on standard input and output, so an agent can search past sessions")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
-		fmt.Fprintln(flag.CommandLine.Output(), "usage: trail [flags]\n       trail [flags] blame file[:line[-line]]\n\nflags:")
+		fmt.Fprintln(flag.CommandLine.Output(), "usage: trail [flags]\n       trail [flags] blame file[:line[-line]]\n       trail [flags] -compare A B\n\nflags:")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -120,6 +121,17 @@ func main() {
 	}
 	if *listNotes {
 		if err := printNotes(idx, notes); err != nil {
+			fmt.Fprintln(os.Stderr, "trail:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if *compare != "" {
+		if flag.NArg() != 1 {
+			fmt.Fprintln(os.Stderr, "trail: -compare takes two sessions: trail -compare A B")
+			os.Exit(2)
+		}
+		if err := compareSessions(idx, os.Stdout, *compare, flag.Arg(0)); err != nil {
 			fmt.Fprintln(os.Stderr, "trail:", err)
 			os.Exit(1)
 		}

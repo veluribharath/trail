@@ -56,6 +56,7 @@ make build
 ./trail -notes     # print your bookmarks and notes, and exit
 ./trail -stats 30   # print the last 30 days in numbers (or -stats all), and exit
 ./trail -mcp       # an MCP server on stdio, so your agent can search past sessions
+./trail -compare c1 c2   # print two sessions side by side, and exit
 ```
 
 On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop. Transcripts often contain secrets, so only do this on a network you trust (or tunnel the port over SSH instead).
@@ -80,6 +81,7 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | `-stats` | off; a number of days, or `all`; see [Stats](#stats) |
 | `-retro` | off; a project folder, or `.`; see [Lessons](#lessons) |
 | `-mcp` | off; see [Let your agent search past sessions](#let-your-agent-search-past-sessions-mcp) |
+| `-compare` | off; see [Compare two sessions](#compare-two-sessions) |
 
 ## What it reads
 
@@ -235,6 +237,20 @@ Notes belong to trail, not to the agents. They're kept in one file, `~/Library/A
 
 An export includes the session's notes and bookmarks, read-only. Untick Include my notes and bookmarks in the export dialog, or pass `-no-notes` to `-export`, to leave them out. `-redact` applies to them as well.
 
+## Compare two sessions
+
+Put two sessions side by side: two agents given the same task, or one agent before and after you changed the prompt. Open a session, choose Compare, and pick the other one; sessions from the same folder are listed first, and any two sessions from any agents can be compared.
+
+The comparison shows:
+
+- **At a glance:** active time (pauses over 5 minutes left out), wall clock, steps, prompts, tool calls, failed calls, edits, files and lines changed, tokens and API-equivalent cost, each with B's difference from A.
+- **Steps:** both traces on one scale, so the longer run is visibly longer. Hover to read a step; click to open the session there.
+- **Prompts:** each session's prompts, and a word-by-word diff of the first prompt when they differ.
+- **Files:** every file either session changed, marked as changed by both or only one. Open a file to read each session's edits to it next to each other. Paths are matched relative to each session's checkout, so two agents in separate worktrees of one repository line up.
+- **Tools** and **failed tool calls** for each side.
+
+From the command line, `./trail -compare A B` prints the numbers and the file list. A and B are session ids, `provider:id`, or the start of an id, as for `-export`.
+
 ## Lessons
 
 Lessons reads every session in a project for two kinds of repeated mistake, and suggests a line for your instructions file for each:
@@ -289,6 +305,7 @@ notes.go     your notes and bookmarks, in trail's own file
 redact.go    secret redaction for exports and MCP results
 mcp.go       trail -mcp: the MCP server and its tools
 retro.go     lessons: repeated corrections and failing commands as suggested rules
+compare.go   two sessions side by side, and -compare
 live.go      live updates for a session that is still being written
 usage.go     token counts per response and session
 prices.go    pricing, with the bundled prices.json and overrides
