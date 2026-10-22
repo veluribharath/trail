@@ -1,5 +1,5 @@
 // trail is a read-only browser for coding-agent sessions. It finds the session
-// logs that Claude Code, Codex and OpenCode leave on disk, files them under the project
+// logs that Claude Code, Codex, OpenCode and Gemini CLI leave on disk, files them under the project
 // folders they ran in, and shows each transcript next to the changes it made.
 package main
 
@@ -38,6 +38,7 @@ func main() {
 	port := flag.Int("port", 7878, "port to listen on (0 picks a free one)")
 	claudeDir := flag.String("claude-dir", envOr("CLAUDE_CONFIG_DIR", filepath.Join(homeDir(), ".claude")), "Claude Code config directory")
 	codexDir := flag.String("codex-dir", envOr("CODEX_HOME", filepath.Join(homeDir(), ".codex")), "Codex home directory")
+	geminiDir := flag.String("gemini-dir", filepath.Join(envOr("GEMINI_CLI_HOME", homeDir()), ".gemini"), "Gemini CLI directory")
 	opencodeDir := flag.String("opencode-dir", filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(homeDir(), ".local", "share")), "opencode"), "OpenCode data directory (holds opencode.db)")
 	open := flag.Bool("open", false, "open the browser after starting")
 	list := flag.Bool("list", false, "print sessions grouped by folder and exit")
@@ -68,7 +69,7 @@ func main() {
 		return
 	}
 
-	idx := NewIndex(&claudeProvider{dir: *claudeDir}, &codexProvider{dir: *codexDir}, &opencodeProvider{dir: *opencodeDir})
+	idx := NewIndex(&claudeProvider{dir: *claudeDir}, &codexProvider{dir: *codexDir}, &opencodeProvider{dir: *opencodeDir}, &geminiProvider{dir: *geminiDir})
 	start := time.Now()
 	status := idx.Scan(0)
 

@@ -326,7 +326,9 @@ func readComplete(path string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if end := bytes.LastIndexByte(b, '\n') + 1; end < len(b) && !json.Valid(b[end:]) {
+	// A file that is one whole JSON document (Gemini CLI's older .json
+	// sessions) is complete even though its last line isn't valid alone.
+	if end := bytes.LastIndexByte(b, '\n') + 1; end < len(b) && !json.Valid(b[end:]) && !json.Valid(b) {
 		b = b[:end]
 	}
 	return b, nil

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -554,5 +555,85 @@ func TestLiveTail(t *testing.T) {
 	os.Remove(path)
 	if ev, _ := next(); ev != "gone" {
 		t.Errorf("deleted session: got %q, want gone", ev)
+	}
+}
+
+func TestGeminiParse(t *testing.T) {
+	p := &geminiProvider{dir: "testdata/gemini"}
+	paths, err := p.Discover()
+	if err != nil || len(paths) != 3 {
+		t.Fatalf("discover should skip subagents and a resumed .json: %v %v", paths, err)
+	}
+	g1 := "testdata/gemini/tmp/shop/chats/session-2026-10-02T09-00-1a2b3c4d.jsonl"
+	tr, err := p.Parse(g1, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := tr.Session
+	if s.ID != "1a2b3c4d-0000-4000-8000-000000000001" || s.Cwd != "/work/shop" || s.Model != "gemini-3-pro" ||
+		s.Title != "Fix cart rounding" || s.TitleKind != "generated" {
+		t.Errorf("summary fields: %+v", s)
+	}
+	if s.Prompt != "Cart totals are off by a cent, fix it" {
+		t.Errorf("prompt should be what the person typed: %q", s.Prompt)
+	}
+	if s.Resume != "cd /work/shop && gemini --resume 1a2b3c4d-0000-4000-8000-000000000001" {
+		t.Errorf("resume: %q", s.Resume)
+	}
+	var got []string
+	for _, c := range tr.Changes {
+		got = append(got, c.Op+" "+c.Rel)
+	}
+	// The failed replace is left out; write_file over an existing file is a
+	// real diff, and a new file is an add.
+	if strings.Join(got, ", ") != "edit cart.go, edit cart_test.go, add README.md" {
+		t.Errorf("changes: %v", got)
+	}
+	if h := tr.Changes[1].Hunks[0]; h.Old != "package cart\n" || h.New != "package cart\n\n// new test\n" {
+		t.Errorf("write_file diff: %+v", h)
+	}
+	var kinds []string
+	var shell, failed *Event
+	for i := range tr.Events {
+		e := &tr.Events[i]
+		kinds = append(kinds, e.Kind)
+		if e.Tool == "run_shell_command" {
+			shell = e
+		}
+		if e.Tool == "replace" && e.Error {
+			failed = e
+		}
+	}
+	if strings.Join(kinds, " ") != "user thinking tool tool tool tool tool assistant user" {
+		t.Errorf("events: %v", kinds)
+	}
+	if shell == nil || shell.Input != "$ go test ./..." || shell.Output != "FAIL cart_test.go" || shell.Summary != "go test ./..." {
+		t.Errorf("the re-appended message should carry the result: %+v", shell)
+	}
+	if failed == nil || failed.Output != "File not found: missing.go" {
+		t.Errorf("failed call: %+v", failed)
+	}
+	for _, e := range tr.Events {
+		if strings.Contains(e.Text, "delete the cart") || strings.Contains(e.Text, "draft") || strings.Contains(e.Text, "thinking...") {
+			t.Errorf("rewound, patched-over or thought text leaked: %q", e.Text)
+		}
+	}
+	if s.Messages != 3 {
+		t.Errorf("messages: %d", s.Messages)
+	}
+	sum, _ := p.Parse(g1, false)
+	if sum.Session.Edits != s.Edits || sum.Session.Messages != s.Messages || len(sum.Events) != 0 {
+		t.Errorf("summary parse disagrees: %+v", sum.Session)
+	}
+
+	// The older one-document format, in a project known from projects.json.
+	legacy := "testdata/gemini/tmp/notes/chats/session-2026-05-01T10-00-22222222.json"
+	b, err := readComplete(legacy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lt, err := p.ParseLines(bytes.NewReader(b), legacy, true)
+	if err != nil || lt.Session.Cwd != "/work/notes" || lt.Session.Messages != 2 || lt.Session.Title != "Summarise my notes" {
+		t.Errorf("legacy session: %+v %v", lt.Session, err)
 	}
 }
