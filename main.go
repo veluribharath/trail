@@ -12,11 +12,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -49,13 +51,21 @@ func main() {
 	semantic := flag.Bool("semantic", false, "also find steps by meaning, using a local embedding model (see -embed-url)")
 	embedURL := flag.String("embed-url", "http://127.0.0.1:11434", "embedding server for -semantic: Ollama, or an OpenAI-compatible URL ending in /v1")
 	embedModel := flag.String("embed-model", "nomic-embed-text", "embedding model for -semantic")
-	forget := flag.Bool("forget", false, "delete the vectors -semantic cached and exit")
+	forget := flag.Bool("forget", false, "delete the vectors -semantic cached and exit (notes and bookmarks are kept)")
+	listNotes := flag.Bool("notes", false, "print your bookmarked and annotated sessions and exit")
 	showPrices := flag.Bool("prices", false, "print the token prices used for API-equivalent costs and exit")
 	stats := flag.String("stats", "", "print activity for the last N days (or all) and exit")
 	export := flag.String("export", "", "write one session (id, provider:id, or id prefix) as a single offline HTML file and exit")
 	out := flag.String("o", "", "file for -export to write; without it the page goes to standard output")
 	compare := flag.String("compare", "", "compare two sessions: trail -compare A B, each an id, provider:id, or id prefix; prints a table and exits")
+	noNotes := flag.Bool("no-notes", false, "leave your notes and bookmarks out of -export")
+	redact := flag.Bool("redact", false, "hide keys, tokens and passwords in the -export file")
+	mcp := flag.Bool("mcp", false, "serve the Model Context Protocol on standard input and output, so an agent can search past sessions")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	flag.Usage = func() {
+		fmt.Fprintln(flag.CommandLine.Output(), "usage: trail [flags]\n       trail [flags] blame file[:line[-line]]\n       trail [flags] -compare A B\n\nflags:")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 
 	if err := loadPriceOverrides(pricesPath()); err != nil {
@@ -87,11 +97,32 @@ func main() {
 
 	idx := NewIndex(&claudeProvider{dir: *claudeDir}, &codexProvider{dir: *codexDir}, &opencodeProvider{dir: *opencodeDir}, &geminiProvider{dir: *geminiDir},
 		&kiroProvider{dir: *kiroDir, dataDir: *kiroDataDir})
+	if *mcp {
+		var sem func(*Search) *Semantic
+		if *semantic {
+			sem = func(srch *Search) *Semantic {
+				return NewSemantic(idx, srch, newHTTPEmbedder(*embedURL, *embedModel), *embedModel, cacheDir())
+			}
+		}
+		if err := newMCPServer(idx, sem, currentVersion()).Serve(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "trail:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	start := time.Now()
 	status := idx.Scan(0)
 
+	notes := NewNoteStore(notesPath())
 	if *list {
 		printList(idx)
+		return
+	}
+	if *listNotes {
+		if err := printNotes(idx, notes); err != nil {
+			fmt.Fprintln(os.Stderr, "trail:", err)
+			os.Exit(1)
+		}
 		return
 	}
 	if *compare != "" {
@@ -105,8 +136,27 @@ func main() {
 		}
 		return
 	}
+	if flag.Arg(0) == "blame" {
+		if flag.NArg() != 2 {
+			fmt.Fprintln(os.Stderr, "usage: trail blame file[:line[-line]]")
+			os.Exit(2)
+		}
+		if err := printBlame(idx, flag.Arg(1)); err != nil {
+			fmt.Fprintln(os.Stderr, "trail:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if flag.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "trail: unknown command %q\n", flag.Arg(0))
+		flag.Usage()
+		os.Exit(2)
+	}
 	if *export != "" {
-		if err := exportSession(idx, *export, *out); err != nil {
+		if *noNotes {
+			notes = nil
+		}
+		if err := exportSession(idx, notes, *export, *out, *redact); err != nil {
 			fmt.Fprintln(os.Stderr, "trail:", err)
 			os.Exit(1)
 		}
@@ -177,7 +227,22 @@ func main() {
 		openBrowser(url)
 	}
 
-	srv := &Server{index: idx, search: srch, semantic: sem, home: homeDir(), version: currentVersion()}
+	// Tell trail -mcp where this window is, so agents search its index
+	// instead of building their own.
+	self := url
+	if *host == "0.0.0.0" || *host == "::" {
+		self = "http://127.0.0.1:" + strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
+	}
+	unannounce := announceUI(self)
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+		<-sig
+		unannounce()
+		os.Exit(0)
+	}()
+
+	srv := &Server{index: idx, search: srch, semantic: sem, notes: notes, home: homeDir(), version: currentVersion()}
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := httpSrv.Serve(ln); err != nil {
 		fmt.Fprintln(os.Stderr, "trail:", err)
@@ -205,10 +270,14 @@ func printList(idx *Index) {
 
 // exportSession writes one session's page to the file the person named, or
 // to standard output when it isn't a terminal. Nothing else is written.
-func exportSession(idx *Index, arg, path string) error {
+func exportSession(idx *Index, store *NoteStore, arg, path string, redact bool) error {
 	s, err := findSession(idx, arg)
 	if err != nil {
 		return err
+	}
+	var notes *SessionNotes
+	if store != nil {
+		notes = store.Get(s.Key)
 	}
 	t, err := idx.Load(s.Key)
 	if err != nil {
@@ -218,10 +287,10 @@ func exportSession(idx *Index, arg, path string) error {
 		if fi, err := os.Stdout.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
 			return fmt.Errorf("-export writes HTML; name a file with -o %s, or redirect the output", exportName(s))
 		}
-		return ExportHTML(context.Background(), os.Stdout, t, homeDir(), currentVersion())
+		return ExportHTMLNotes(context.Background(), os.Stdout, t, homeDir(), currentVersion(), redact, notes)
 	}
 	var b bytes.Buffer
-	if err := ExportHTML(context.Background(), &b, t, homeDir(), currentVersion()); err != nil {
+	if err := ExportHTMLNotes(context.Background(), &b, t, homeDir(), currentVersion(), redact, notes); err != nil {
 		return err
 	}
 	// Readable only by you: the file holds the whole transcript.

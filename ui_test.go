@@ -49,7 +49,7 @@ func TestUISmoke(t *testing.T) {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		ExportHTML(r.Context(), w, tr, "/work", "test")
+		ExportHTML(r.Context(), w, tr, "/work", "test", false)
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()

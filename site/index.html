@@ -25,6 +25,7 @@
       <span>trail</span>
     </a>
     <nav class="top-nav" aria-label="Sections">
+      <a href="#blame">Blame</a>
       <a href="#features">Features</a>
       <a href="#agents">Agents</a>
       <a href="#install">Install</a>
@@ -82,6 +83,29 @@
     </div>
   </section>
 
+  <section id="blame" class="blame-demo" aria-labelledby="blame-h">
+    <div class="wrap split">
+      <div>
+        <p class="kicker">New in this release</p>
+        <h2 id="blame-h">Which session wrote this line?</h2>
+        <p><code>trail blame cart.go:16</code> follows a line through git to the session and step that wrote it, with the prompt that asked for it and the command to resume that session. In the app, “Who wrote this” shows a whole file this way.</p>
+        <p>It works from the logs already on your disk. There are no hooks to install before the agent starts, so sessions from months ago count too, and nothing leaves your machine.</p>
+        <p class="hint">trail matches each line’s text against the edits each session recorded before the line was committed. That way work squashed into one commit, or not committed yet, still finds its session.</p>
+      </div>
+      <div class="demo blame-box" aria-label="Example: trail blame output">
+<pre><code><span class="c">$</span> trail blame cart.go:16
+cart.go:16
+    if pct &lt;= 0 {
+
+<span class="k">commit </span>  5b479a2  Tony, 2026-10-21 15:40  Promo discounts
+<span class="k">session</span>  <span class="dot claude"></span>Claude Code: Add percentage discounts
+<span class="k">step   </span>  #3 of 3, Edit cart.go, 2026-10-21 15:00
+<span class="k">asked  </span>  Add a Discount helper for promo codes
+<span class="k">resume </span>  cd ~/code/shop &amp;&amp; claude --resume 7f3e…</code></pre>
+      </div>
+    </div>
+  </section>
+
   <section id="features" class="features" aria-labelledby="feat-h">
     <div class="wrap">
       <h2 id="feat-h" class="section-title">Everything an agent did, in one place.</h2>
@@ -94,7 +118,7 @@
         <article class="card">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h7v14H4zM13 5h7v14h-7zM8 9h-.01M17 10l-2 2 2 2"/></svg>
           <h3>Transcript beside its diffs</h3>
-          <p>Click an edit in the transcript to jump to its diff. Click a diff to jump back to the step that made it. Each diff is the exact before and after the agent sent, and the Commits tab shows what reached git while the session ran.</p>
+          <p>Click an edit in the transcript to jump to its diff. Click a diff to jump back to the step that made it. Each diff is the exact before and after the agent sent, and the Commits tab shows what reached git while the session ran. Bookmark the step that matters and leave yourself a note.</p>
         </article>
         <article class="card">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 20h17M6.5 16.5v-4M12 16.5V6.5M17.5 16.5v-7"/></svg>
@@ -119,8 +143,15 @@
             <div><dt><kbd>⌘</kbd><kbd>K</kbd></dt><dd>Jump to any session</dd></div>
             <div><dt><kbd>/</kbd></dt><dd>Filter the sidebar</dd></div>
             <div><dt><kbd>j</kbd><kbd>k</kbd></dt><dd>Next and previous session</dd></div>
+            <div><dt><kbd>b</kbd></dt><dd>Bookmark this session</dd></div>
             <div><dt><kbd>←</kbd><kbd>→</kbd></dt><dd>Step along the trace</dd></div>
           </dl>
+        </article>
+        <article class="card wide">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5M8 10.5h5M10.5 8v5"/></svg>
+          <h3>Let your agent search its past</h3>
+          <p>Run <code>trail -mcp</code> as an MCP server and your agent can search every past session on this machine, list recent ones in a project, and read any of them. It's how it finds the fix it already made last month. Nothing runs in the background: the agent starts trail when it needs it, and if a trail window is open, it uses that window's index. Keys, tokens and passwords are redacted before the agent sees them.</p>
+          <pre data-copy="claude mcp add trail -- trail -mcp"><code>claude mcp add trail -- trail -mcp</code><button class="copy" type="button" aria-label="Copy">Copy</button></pre>
         </article>
       </div>
     </div>
@@ -133,7 +164,7 @@
         <p>Session logs hold prompts, file contents, command output and often secrets. trail is built so none of that goes anywhere.</p>
       </div>
       <ul class="checks">
-        <li><b>Read-only.</b> It reads agent storage and never writes to it. An export is saved only where you choose, and the file can't load or send anything.</li>
+        <li><b>Read-only.</b> It reads agent storage and never writes to it. Your notes and bookmarks go in a file of trail's own, readable only by you. An export is saved only where you choose, and the file can't load or send anything.</li>
         <li><b>Offline.</b> The UI is embedded in the binary, fonts included. Nothing loads from the network.</li>
         <li><b>Local.</b> It listens on 127.0.0.1 by default and only runs <code>git</code> on your machine.</li>
         <li><b>No dependencies.</b> One static Go binary, built from the standard library.</li>
@@ -195,8 +226,10 @@ trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</but
           <pre><code>./trail          <span class="c"># http://127.0.0.1:7878</span>
 ./trail -open    <span class="c"># and open the browser</span>
 ./trail -list    <span class="c"># print sessions by folder and exit</span>
+./trail blame cart.go:16  <span class="c"># the session and step that wrote a line</span>
 ./trail -export c1 -o session.html  <span class="c"># one session as an offline page</span>
 ./trail -stats 30  <span class="c"># the last 30 days in numbers</span>
+./trail -mcp     <span class="c"># MCP server for your agent, on stdio</span>
 ./trail -compare c1 c2  <span class="c"># two sessions side by side</span></code></pre>
           <p class="note">On a remote dev box, run <code>./trail -host 0.0.0.0</code> on a network you trust, or tunnel the port over SSH.</p>
         </div>
@@ -213,8 +246,9 @@ trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</but
               <tr><td><code>-kiro-dir</code></td><td><code>~/.kiro</code></td></tr>
               <tr><td><code>-kiro-data-dir</code></td><td><code>~/.local/share/kiro-cli</code>; <code>~/Library/Application Support/kiro-cli</code> on macOS</td></tr>
               <tr><td><code>-stats</code></td><td>off; a number of days, or <code>all</code></td></tr>
+              <tr><td><code>-export</code>, <code>-o</code>, <code>-redact</code></td><td>off; see <a href="https://github.com/veluribharath/trail#export-a-session">Export a session</a></td></tr>
+              <tr><td><code>-mcp</code></td><td>off; see <a href="https://github.com/veluribharath/trail#let-your-agent-search-past-sessions-mcp">MCP</a></td></tr>
               <tr><td><code>-compare</code></td><td>off; two session ids, see <a href="https://github.com/veluribharath/trail#compare-two-sessions">Compare two sessions</a></td></tr>
-              <tr><td><code>-export</code>, <code>-o</code></td><td>off; see <a href="https://github.com/veluribharath/trail#export-a-session">Export a session</a></td></tr>
             </tbody>
           </table>
         </div>
