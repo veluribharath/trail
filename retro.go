@@ -751,7 +751,12 @@ func fixes(failed, next shellRun, env bool) bool {
 		return strings.TrimPrefix(next.sig, next.prog) == strings.TrimPrefix(failed.sig, failed.prog) ||
 			(len(failed.args) > 0 && jaccard(next.args, failed.args) >= 0.5)
 	case env && next.prog == failed.prog:
-		return true // npm test -> npm run test:unit after "missing script"
+		// npm test -> npm run test:unit after "missing script": the same
+		// program with a subcommand that names the one that wasn't there.
+		// Any other command of the same program (git status after a failed
+		// git push) says nothing about what to run instead.
+		sub := strings.TrimSpace(strings.TrimPrefix(failed.sig, failed.prog))
+		return sub != "" && strings.Contains(strings.TrimPrefix(next.sig, next.prog), sub)
 	case env && len(failed.args) > 0:
 		return jaccard(next.args, failed.args) >= 0.5 // rg foo . -> grep -r foo .
 	}

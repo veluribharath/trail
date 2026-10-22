@@ -103,8 +103,14 @@ func TestSessionFailures(t *testing.T) {
 		sh("uv run pytest -q", false, ""),
 		// Refused.
 		sh("git push origin main", true, "The user doesn't want to proceed with this tool use. The tool use was rejected"),
+		// The same program doing something else isn't a fix.
+		sh("git push", true, "remote: Permission denied to bot."),
+		sh("git status", false, "clean"),
 		// Failing for a reason that isn't about the environment, with no fix.
 		sh("go build ./...", true, "./cart.go:3: undefined: Total"),
+		// A subcommand that doesn't exist, then one that names it.
+		sh("npm test", true, "npm ERR! Missing script: \"test\""),
+		sh("npm run test:unit", false, "ok"),
 	}}
 	got := sessionFailures(tr)
 	type row struct{ sig, fix string }
@@ -116,7 +122,7 @@ func TestSessionFailures(t *testing.T) {
 		}
 		rows = append(rows, row{f.sig, fix})
 	}
-	want := []row{{"npm install", "pnpm install"}, {"python", "python3"}, {"pytest", "uv run pytest"}, {"git push", "(refused)"}}
+	want := []row{{"npm install", "pnpm install"}, {"python", "python3"}, {"pytest", "uv run pytest"}, {"git push", "(refused)"}, {"git push", ""}, {"npm test", "npm run test:unit"}}
 	if fmt.Sprint(rows) != fmt.Sprint(want) {
 		t.Fatalf("failures:\n got %v\nwant %v", rows, want)
 	}
