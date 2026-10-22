@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -32,6 +33,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/live", s.handleLive)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/export", s.handleExport)
+	mux.HandleFunc("GET /api/blame", s.handleBlame)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/ping", s.handlePing)
 	sub, _ := fs.Sub(webFS, "web")
@@ -155,6 +157,57 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]string{"patch": patch})
+}
+
+// handleBlame attributes a file's lines to sessions. A relative path is read
+// against the session named by id. Only files under a folder some session
+// ran in can be read, so the page can't be used to read anything else.
+func (s *Server) handleBlame(w http.ResponseWriter, r *http.Request) {
+	p := strings.TrimSpace(r.URL.Query().Get("path"))
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		p = filepath.Join(s.home, p[1:])
+	}
+	if p == "" {
+		fail(w, http.StatusBadRequest, "Name a file.")
+		return
+	}
+	if !filepath.IsAbs(p) {
+		sess := s.index.Get(r.URL.Query().Get("id"))
+		if sess == nil {
+			fail(w, http.StatusBadRequest, "Give the file's full path, or a path inside a session's folder.")
+			return
+		}
+		p = filepath.Join(sess.Cwd, p)
+	}
+	// Resolve the file itself too: a link inside a session folder must not
+	// lead to a file outside every one.
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	} else {
+		p = realPath(filepath.Clean(p))
+	}
+	if !s.underSession(p) {
+		fail(w, http.StatusForbidden, "trail only reads files inside folders your sessions ran in.")
+		return
+	}
+	writeJSON(w, Blame(r.Context(), s.index, p))
+}
+
+func (s *Server) underSession(p string) bool {
+	for _, sess := range s.index.Sessions() {
+		for _, dir := range []string{sess.Root, sess.Worktree, sess.Cwd} {
+			if dir == "" || !filepath.IsAbs(dir) {
+				continue
+			}
+			if d, err := filepath.EvalSymlinks(dir); err == nil {
+				dir = d
+			}
+			if rel, err := filepath.Rel(dir, p); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

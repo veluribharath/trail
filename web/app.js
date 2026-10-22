@@ -339,6 +339,7 @@ function renderHome() {
       <h1>${plural(d.sessions.length, "session")} across ${plural(folders, "folder")}</h1>
       <p class="lede">${lastDay ? `${plural(lastDay, "session")} ran in the last day. ` : ""}Open one to read what the agent did next to every file it changed, or see <a class="lede-link" href="#stats">stats across every project</a>.</p>
       <h2>Pick up where you left off</h2><div class="recent"></div>
+      <h2>Who wrote this?</h2>${blameForm("")}
       <h2>Where trail looks</h2><div class="sources"></div></div></div>`));
     const recent = $(".recent", view);
     for (const s of d.sessions.slice(0, 8)) {
@@ -350,6 +351,7 @@ function renderHome() {
       recent.append(row);
     }
   }
+  setupBlameForm(view);
   const src = $(".sources", view);
   for (const p of d.providers) {
     src.append(h(`<div class="src"><span class="pmark ${esc(p.name)}"></span><span>${esc(PROVIDERS[p.name] || p.name)}</span>
@@ -1040,8 +1042,11 @@ function renderChangesPane() {
     const card = h(`<article class="change" id="ch-${i}">
       <div class="change-head"><span class="p" title="${esc(c.path)}"><bdi>${esc(c.rel)}</bdi></span>
         <span class="op ${esc(c.op)}">${esc(OPS[c.op] || c.op)}${target}</span>${c.op === "delete" ? "" : `<span class="nums mono">${counts(d)}</span>`}
-        <button class="jump" title="Scroll the transcript to the step that made this change">Show step</button></div></article>`);
-    $(".jump", card).onclick = () => focusEvent(c.event, i);
+        ${EXPORTED || c.op === "delete" ? "" : `<button class="jump who" title="See which session wrote each line of this file as it is now">Who wrote this</button>`}
+        <button class="jump step" title="Scroll the transcript to the step that made this change">Show step</button></div></article>`);
+    $(".jump.step", card).onclick = () => focusEvent(c.event, i);
+    const who = $(".jump.who", card);
+    if (who) who.onclick = () => goBlame(c.moveTo || c.path, 0, state.current);
     if (c.op === "delete") card.append(h(`<div class="note">The agent deleted this file.</div>`));
     else if (!d.hunks.length || d.hunks.every((r) => !r.length)) card.append(h(`<div class="note">No content recorded for this change.</div>`));
     for (const rows of d.hunks) {
@@ -1144,6 +1149,155 @@ async function renderCommits(pane) {
     list.append(b);
   }
   pane.append(list);
+}
+
+/* ---------------- who wrote this ---------------- */
+// The blame view: a file as it is now, each run of lines under the session
+// step that wrote it, or the commit when no session did.
+const blame = { seq: 0 };
+
+function goBlame(path, line, id) {
+  const q = new URLSearchParams({ f: path });
+  if (line) q.set("l", line);
+  if (id && !path.startsWith("/") && !/^[A-Za-z]:[\\/]/.test(path)) q.set("id", id);
+  location.hash = q.toString();
+  closeDrawer();
+}
+
+function blameForm(value) {
+  return `<form class="blame-form" role="search"><label>${svg("file")}<input name="f" value="${esc(value)}" placeholder="~/code/app/main.go:42" autocomplete="off" spellcheck="false" aria-label="File, with an optional line number"></label>
+    <button class="btn" type="submit">Find the session</button></form>`;
+}
+
+function setupBlameForm(root) {
+  const f = $(".blame-form", root);
+  if (!f) return;
+  f.onsubmit = (e) => {
+    e.preventDefault();
+    const v = f.elements.f.value.trim();
+    if (!v) return;
+    const m = v.match(/^(.*?):(\d+)(?:-\d+)?$/);
+    goBlame(m ? m[1] : v, m ? +m[2] : 0);
+  };
+}
+
+async function openBlame(path, line, id) {
+  const seq = ++blame.seq;
+  const view = $("#view");
+  view.innerHTML = `<div class="loading">Reading ${esc(tildify(path))} and the sessions that touched it…</div>`;
+  let r;
+  try {
+    r = await api(`/api/blame?path=${encodeURIComponent(path)}${id ? `&id=${encodeURIComponent(id)}` : ""}`);
+  } catch (e) { r = { available: false, reason: e.message }; }
+  if (seq !== blame.seq) return;
+  if (!r.available) {
+    view.innerHTML = "";
+    const el = h(`<div class="home"><div class="home-inner"><h1>Who wrote this?</h1>${blameForm(path)}
+      <div class="empty-pane"><strong>Couldn’t read that file</strong>${esc(r.reason)}</div></div></div>`);
+    view.append(el);
+    setupBlameForm(el);
+    return;
+  }
+  renderBlame(r, line);
+}
+
+function blameStats(r) {
+  const keys = new Set(r.sources.map((s) => s.key));
+  const agent = r.lines.filter((l) => l.source >= 0).length;
+  return { keys, agent };
+}
+
+function renderBlame(r, line) {
+  const view = $("#view");
+  view.innerHTML = "";
+  const st = blameStats(r);
+  const total = r.lines.length;
+  const pct = total ? Math.round((st.agent / total) * 100) : 0;
+  const el = h(`<div class="blame">
+    <header class="s-head b-head"><div class="titles">
+      <p class="eyebrow">Who wrote this</p>
+      <h1 class="mono" title="${esc(r.path)}">${esc(r.rel)}</h1>
+      <div class="meta"><span title="${esc(r.path)}">${svg("folder")}<span class="cwd"><bdi>${esc(tildify(r.toplevel || r.path))}</bdi></span></span>
+        ${r.toplevel ? "" : `<span>Not in a git repository, so every line counts as uncommitted</span>`}</div>
+      <div class="facts"><span><b>${st.agent}</b> of <b>${total}</b> ${total === 1 ? "line" : "lines"} (${pct}%) from ${plural(st.keys.size, "session")}</span>
+        <span>${plural(r.searched, "session")} read</span></div>
+    </div><div class="actions">${blameForm(r.rel === r.path ? r.path : tildify(r.path))}</div></header>
+    <div class="b-body"><div class="b-who"></div><div class="b-code" role="table" aria-label="Lines of ${esc(r.rel)}"></div></div></div>`);
+  setupBlameForm(el);
+  view.append(el);
+
+  // Sessions, most lines first.
+  const bySession = new Map();
+  r.sources.forEach((s) => {
+    const e = bySession.get(s.key) || { s, lines: 0, steps: 0 };
+    e.lines += s.lines; e.steps++;
+    bySession.set(s.key, e);
+  });
+  const who = $(".b-who", el);
+  if (!bySession.size) {
+    who.append(h(`<div class="b-none">No session’s recorded edits contain these lines. A person wrote them, or an agent did in a way its transcript doesn’t record.</div>`));
+  }
+  for (const { s, lines, steps } of [...bySession.values()].sort((a, b) => b.lines - a.lines)) {
+    const b = h(`<button class="b-sess" title="${esc(s.prompt || s.title)}"><span class="pmark ${esc(s.provider)}"></span>
+      <span class="t">${esc(s.title)}</span><span class="n">${plural(lines, "line")}</span>
+      <span class="sub">${esc(PROVIDERS[s.provider] || s.provider)} · ${plural(steps, "step")} · ${esc(ago(s.time))}</span></button>`);
+    b.onclick = () => openStep(s);
+    who.append(b);
+  }
+
+  const code = $(".b-code", el);
+  const LIMIT = 4000;
+  const draw = (upto) => {
+    code.innerHTML = "";
+    const width = String(total).length;
+    let i = 0;
+    while (i < Math.min(upto, total)) {
+      const l = r.lines[i];
+      let j = i + 1;
+      while (j < total && r.lines[j].source === l.source && r.lines[j].commit === l.commit) j++;
+      code.append(blameRun(r, i, j, width, line));
+      i = j;
+    }
+    if (total > upto) {
+      const more = h(`<button class="more btn">Show the other ${total - upto} lines</button>`);
+      more.onclick = () => draw(total);
+      code.append(more);
+    }
+  };
+  draw(line > LIMIT ? total : LIMIT);
+  if (r.truncated) code.append(h(`<div class="note">Only the first ${r.lines.length} lines were read.</div>`));
+  if (line) {
+    const row = document.getElementById("bl-" + line);
+    if (row) requestAnimationFrame(() => { row.scrollIntoView({ block: "center" }); flash(row); });
+  }
+}
+
+function blameRun(r, from, to, width, target) {
+  const l = r.lines[from];
+  const s = l.source >= 0 ? r.sources[l.source] : null;
+  const c = l.commit >= 0 ? r.commits[l.commit] : null;
+  const commit = c ? `<span class="sha" title="${esc(c.subject)}">${esc(c.short)}</span><span>${esc(c.author)}, ${esc(ago(c.when))}</span>`
+    : `<span>Not committed yet</span>`;
+  const head = s
+    ? `<button class="b-run-head agent" title="${esc(s.prompt ? "Asked: " + s.prompt : s.title)}"><span class="pmark ${esc(s.provider)}"></span>
+        <span class="t">${esc(s.title)}</span>
+        <span class="step">Step ${s.event + 1}${s.summary ? ` · ${esc(s.summary)}` : ""}${s.op === "shell" ? ` <em title="No edit records these lines, but this shell command contains them and names the file">probably</em>` : ""}</span>
+        <span class="c">${commit}</span></button>`
+    : `<div class="b-run-head"><span class="t">No session</span><span class="c">${commit}</span></div>`;
+  const rows = [];
+  for (let i = from; i < to; i++) {
+    const n = i + 1;
+    rows.push(`<div class="b-line${n === target ? " on" : ""}" id="bl-${n}" role="row"><a class="ln" href="#${esc(new URLSearchParams({ f: r.path, l: n }).toString())}" role="cell">${String(n).padStart(width, " ")}</a><span class="tx" role="cell">${esc(r.lines[i].text) || " "}</span></div>`);
+  }
+  const run = h(`<section class="b-run ${s ? "agent " + esc(s.provider) : "none"}">${head}<div class="b-lines">${rows.join("")}</div></section>`);
+  if (s) $(".b-run-head", run).onclick = () => openStep(s);
+  return run;
+}
+
+// openStep opens a session at the step that wrote some lines.
+function openStep(s) {
+  state.pendingJump = { event: s.event, field: "input" };
+  go(s.key);
 }
 
 /* ---------------- palette ---------------- */
@@ -1672,9 +1826,17 @@ function rateLine(box, rows) {
 
 /* ---------------- routing & refresh ---------------- */
 const onStats = () => location.hash.startsWith("#stats");
+const onBlame = () => location.hash.startsWith("#f=");
 
 function route() {
   if (onStats()) return openStats();
+  if (onBlame()) {
+    const q = new URLSearchParams(location.hash.slice(1));
+    stopLive();
+    state.current = null;
+    renderSidebar();
+    return openBlame(q.get("f"), +q.get("l") || 0, q.get("id") || "");
+  }
   const m = location.hash.match(/^#s=(.+)$/);
   const key = m ? decodeURIComponent(m[1]) : null;
   if (key && state.data.sessions.some((s) => s.key === key)) {
@@ -1722,7 +1884,7 @@ async function init() {
   if (!state.data) return;
   route();
   window.addEventListener("hashchange", route);
-  $("#refresh").onclick = async () => { await load(true); if (onStats()) loadStats(); else if (!state.current) renderHome(); };
+  $("#refresh").onclick = async () => { await load(true); if (onStats()) loadStats(); else if (!state.current && !onBlame()) renderHome(); };
   $("#stats-open").onclick = () => { location.hash = statsHash(); closeDrawer(); };
   $("#q").addEventListener("input", (e) => { state.q = e.target.value; renderSidebar(); });
   $("#q").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.target.value = ""; state.q = ""; renderSidebar(); e.target.blur(); } });
@@ -1762,7 +1924,7 @@ async function init() {
     if (document.hidden) return;
     const changed = await load();
     if (changed && onStats()) loadStats();
-    else if (changed && !state.current) renderHome();
+    else if (changed && !state.current && !onBlame()) renderHome();
     if (changed) startLive();
   }, 20000);
 }

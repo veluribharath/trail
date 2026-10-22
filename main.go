@@ -59,6 +59,10 @@ func main() {
 	redact := flag.Bool("redact", false, "hide keys, tokens and passwords in the -export file")
 	mcp := flag.Bool("mcp", false, "serve the Model Context Protocol on standard input and output, so an agent can search past sessions")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	flag.Usage = func() {
+		fmt.Fprintln(flag.CommandLine.Output(), "usage: trail [flags]\n       trail [flags] blame file[:line[-line]]\n\nflags:")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 
 	if err := loadPriceOverrides(pricesPath()); err != nil {
@@ -109,6 +113,22 @@ func main() {
 	if *list {
 		printList(idx)
 		return
+	}
+	if flag.Arg(0) == "blame" {
+		if flag.NArg() != 2 {
+			fmt.Fprintln(os.Stderr, "usage: trail blame file[:line[-line]]")
+			os.Exit(2)
+		}
+		if err := printBlame(idx, flag.Arg(1)); err != nil {
+			fmt.Fprintln(os.Stderr, "trail:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if flag.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "trail: unknown command %q\n", flag.Arg(0))
+		flag.Usage()
+		os.Exit(2)
 	}
 	if *export != "" {
 		if err := exportSession(idx, *export, *out, *redact); err != nil {
