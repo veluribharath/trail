@@ -30,8 +30,9 @@ type opencodeProvider struct {
 	stampsDB *sqliteDB         // the snapshot stamps were read from
 }
 
-func (p *opencodeProvider) Name() string { return "opencode" }
-func (p *opencodeProvider) Root() string { return p.dir }
+func (p *opencodeProvider) Name() string      { return "opencode" }
+func (p *opencodeProvider) Root() string      { return p.dir }
+func (p *opencodeProvider) Sources() []string { return []string{p.dbPath()} }
 func (p *opencodeProvider) dbPath() string {
 	return filepath.Join(p.dir, "opencode.db")
 }

@@ -259,7 +259,9 @@ svg.on { fill: currentColor; }
 .src { display: grid; grid-template-columns: 9px 110px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 11px 2px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .src .path { color: var(--muted); font-family: var(--mono); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .src .state { color: var(--muted); font-variant-numeric: tabular-nums; }
-.src .state.missing { color: var(--faint); }
+.src.missing .state, .src.empty .state { color: var(--faint); }
+.src.unreadable .state { color: var(--del); }
+.src .why { grid-column: 3 / 5; margin-top: -6px; color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
 
 .lede-link { color: var(--ink-2); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
 .lede-link:hover { color: var(--ink); text-decoration-color: currentColor; }
@@ -793,6 +795,8 @@ button.b-run-head:hover { background: var(--hover); }
   .changes { padding: 8px 10px 64px; }
   .src { grid-template-columns: 9px 90px minmax(0, 1fr); }
   .src .state { grid-column: 2 / 4; margin-top: -8px; }
+  .src .why { grid-column: 2 / 4; }
+  .src .path { white-space: normal; overflow-wrap: anywhere; }
   .b-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
   .b-who { max-height: 30vh; border-right: 0; border-bottom: 1px solid var(--line-soft); padding: 8px; }
   .b-code { padding: 10px 10px 48px; }

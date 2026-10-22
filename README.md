@@ -47,7 +47,7 @@ make build
 ```
 ./trail            # http://127.0.0.1:7878
 ./trail -open      # and open the browser
-./trail -list      # print sessions by folder and exit
+./trail -list      # print sessions by folder and exit (or, with none, where trail looked)
 ./trail -search "flaky login"   # print matching sessions and steps, and exit
 ./trail blame cart.go:42        # the session and step that wrote a line, and exit
 ./trail -prices    # print the token prices used for costs, and exit
