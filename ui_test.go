@@ -37,8 +37,7 @@ func TestUISmoke(t *testing.T) {
 		t.Skip("no Chrome or Chromium found; set TRAIL_CHROME to run the UI smoke test")
 	}
 
-	idx := NewIndex(&claudeProvider{dir: "testdata/claude"}, &codexProvider{dir: "testdata/codex"}, &opencodeProvider{dir: "testdata/opencode"}, &geminiProvider{dir: "testdata/gemini"})
-	idx.Scan(0)
+	idx := exportIndex() // every provider's fixtures
 	sessions := idx.Sessions()
 	mux := http.NewServeMux()
 	mux.Handle("/", (&Server{index: idx, search: NewSearch(idx), home: "/work", version: "test"}).Handler())

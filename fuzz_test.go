@@ -48,6 +48,39 @@ func FuzzOpenCode(f *testing.F) {
 	})
 }
 
+// FuzzKiro runs the Kiro provider on a mangled database and on mangled
+// session files from both of its JSONL layouts.
+func FuzzKiro(f *testing.F) {
+	cli := "testdata/kiro/home/sessions/cli/0b1c2d3e-0000-4000-8000-000000000001"
+	v3 := "testdata/kiro/home/sessions/notes-1a2b/sess_00000000-0000-4000-8000-0000000000b3/"
+	f.Add(readFile(f, "testdata/kiro/data/data.sqlite3"), readFile(f, cli+".jsonl"), readFile(f, cli+".json"),
+		readFile(f, v3+"messages.jsonl"), readFile(f, v3+"session.json"))
+	f.Fuzz(func(t *testing.T, db, cliLines, cliHead, v3Lines, v3Head []byte) {
+		dir := t.TempDir()
+		for name, b := range map[string][]byte{
+			"data/data.sqlite3":                     db,
+			"home/sessions/cli/s.jsonl":             cliLines,
+			"home/sessions/cli/s.json":              cliHead,
+			"home/sessions/w/sess_s/messages.jsonl": v3Lines,
+			"home/sessions/w/sess_s/session.json":   v3Head,
+		} {
+			path := filepath.Join(dir, name)
+			if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(path, b, 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		p := &kiroProvider{dir: filepath.Join(dir, "home"), dataDir: filepath.Join(dir, "data")}
+		paths, _ := p.Discover()
+		for _, s := range paths {
+			p.Stamp(s)
+			p.Parse(s, true)
+		}
+	})
+}
+
 func readFile(f *testing.F, path string) []byte {
 	b, err := os.ReadFile(path)
 	if err != nil {

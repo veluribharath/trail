@@ -10,7 +10,7 @@ test:
 # Each fuzz test for FUZZTIME (default 1m). Crashes are saved under testdata/fuzz/.
 FUZZTIME ?= 1m
 fuzz:
-	for f in FuzzSQLite FuzzOpenCode FuzzParsePatch FuzzTranscripts; do \
+	for f in FuzzSQLite FuzzOpenCode FuzzKiro FuzzParsePatch FuzzTranscripts; do \
 		go test -run '^$$' -fuzz "^$$f$$" -fuzztime $(FUZZTIME) -fuzzminimizetime 5s . || exit 1; \
 	done
 
