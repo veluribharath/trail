@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"encoding/json"
 	"io/fs"
@@ -30,6 +31,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/commit", s.handleCommit)
 	mux.HandleFunc("GET /api/live", s.handleLive)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
+	mux.HandleFunc("GET /api/export", s.handleExport)
 	sub, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", noCache(http.FileServer(http.FS(sub))))
 	return securityHeaders(mux)
@@ -78,6 +80,25 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		res = s.semantic.Blend(r.Context(), q, res, only, limit)
 	}
 	writeJSON(w, res)
+}
+
+// handleExport sends one session as an offline HTML file. It's a download,
+// so the browser asks where to save it; trail itself writes nothing.
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	t, err := s.index.Load(r.URL.Query().Get("id"))
+	if err != nil {
+		fail(w, http.StatusNotFound, "That session is no longer on disk. Refresh the list.")
+		return
+	}
+	var b bytes.Buffer
+	if err := ExportHTML(r.Context(), &b, t, s.home, s.version); err != nil {
+		fail(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+exportName(t.Session)+`"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Write(b.Bytes())
 }
 
 func (s *Server) handleCommits(w http.ResponseWriter, r *http.Request) {
