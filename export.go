@@ -38,13 +38,15 @@ var fontURL = regexp.MustCompile(`url\("fonts/([a-z0-9.-]+\.woff2)"\)`)
 // ExportHTML writes t as a self-contained HTML page. Commits are included
 // only when they touch a file the session edited, each with its patch, so
 // the file carries what the session did and not the rest of the repository.
-func ExportHTML(ctx context.Context, w io.Writer, t *Transcript, home, version string) error {
-	return ExportHTMLNotes(ctx, w, t, home, version, nil)
+// With redact, credentials are hidden in the transcript, commit messages,
+// patches and notes; t itself is redacted in place.
+func ExportHTML(ctx context.Context, w io.Writer, t *Transcript, home, version string, redact bool) error {
+	return ExportHTMLNotes(ctx, w, t, home, version, redact, nil)
 }
 
 // ExportHTMLNotes is ExportHTML with the person's notes and bookmarks on the
-// page, read-only. nil leaves them out.
-func ExportHTMLNotes(ctx context.Context, w io.Writer, t *Transcript, home, version string, notes *SessionNotes) error {
+// page, read-only. nil leaves them out; with redact, notes is redacted in place.
+func ExportHTMLNotes(ctx context.Context, w io.Writer, t *Transcript, home, version string, redact bool, notes *SessionNotes) error {
 	data := exportData{Version: version, Exported: time.Now().UTC(), Home: home, Transcript: t, Patches: map[string]string{}, Notes: notes}
 	data.Commits = SessionCommits(ctx, t)
 	kept := data.Commits.Commits[:0]
@@ -57,6 +59,23 @@ func ExportHTMLNotes(ctx context.Context, w io.Writer, t *Transcript, home, vers
 	for _, c := range kept {
 		if p, err := CommitPatch(ctx, t.Session.Cwd, c.SHA); err == nil {
 			data.Patches[c.SHA] = p
+		}
+	}
+	if redact {
+		RedactTranscript(t)
+		for i := range data.Commits.Commits {
+			c := &data.Commits.Commits[i]
+			c.Subject = Redact(c.Subject)
+		}
+		for sha, p := range data.Patches {
+			data.Patches[sha] = Redact(p)
+		}
+		if notes != nil {
+			notes.Note = Redact(notes.Note)
+			for i := range notes.Steps {
+				notes.Steps[i].Label = Redact(notes.Steps[i].Label)
+				notes.Steps[i].Note = Redact(notes.Steps[i].Note)
+			}
 		}
 	}
 	return writeExport(w, &data)
@@ -159,8 +178,17 @@ func findSession(idx *Index, arg string) (*Session, error) {
 	if s := idx.Get(arg); s != nil {
 		return s, nil
 	}
+	return pickSession(idx.Sessions(), arg)
+}
+
+// pickSession is findSession over a list of sessions.
+func pickSession(sessions []*Session, arg string) (*Session, error) {
+	arg = strings.TrimSpace(arg)
 	var exact, prefix []*Session
-	for _, s := range idx.Sessions() {
+	for _, s := range sessions {
+		if s.Key == arg {
+			return s, nil
+		}
 		if s.ID == arg {
 			exact = append(exact, s)
 		} else if arg != "" && strings.HasPrefix(s.ID, arg) {

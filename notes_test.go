@@ -202,7 +202,7 @@ func TestExportSessionNotes(t *testing.T) {
 	store := NewNoteStore(filepath.Join(dir, "notes.json"))
 	store.Set("claude:c1", SessionNotes{Note: "</script><script>alert(1)</script>"})
 	out := filepath.Join(dir, "s.html")
-	if err := exportSession(idx, store, "c1", out); err != nil {
+	if err := exportSession(idx, store, "c1", out, false); err != nil {
 		t.Fatal(err)
 	}
 	b, _ := os.ReadFile(out)
@@ -214,12 +214,28 @@ func TestExportSessionNotes(t *testing.T) {
 	if data.Notes == nil || !strings.Contains(data.Notes.Note, "alert(1)") {
 		t.Errorf("export notes: %+v", data.Notes)
 	}
-	if err := exportSession(idx, nil, "c1", out); err != nil {
+	if err := exportSession(idx, nil, "c1", out, false); err != nil {
 		t.Fatal(err)
 	}
 	b, _ = os.ReadFile(out)
 	if bytes.Contains(b, []byte("alert(1)")) {
 		t.Error("-no-notes export still has the note")
+	}
+
+	// -redact covers what the person wrote, too.
+	store.Set("claude:c1", SessionNotes{Note: "db password=hunter2hunter2",
+		Steps: []StepMark{{Event: 1, Label: "export API_KEY=Xk9fQ2pLm7Zr4T", Note: "token: s3cr3tvalue99"}}})
+	if err := exportSession(idx, store, "c1", out, true); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = os.ReadFile(out)
+	for _, secret := range []string{"hunter2hunter2", "Xk9fQ2pLm7Zr4T", "s3cr3tvalue99"} {
+		if bytes.Contains(b, []byte(secret)) {
+			t.Errorf("-redact export still has %q from the notes", secret)
+		}
+	}
+	if s := store.Get("claude:c1"); s.Note != "db password=hunter2hunter2" {
+		t.Errorf("redacting the export changed the stored note: %q", s.Note)
 	}
 }
 
