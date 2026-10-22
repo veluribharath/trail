@@ -112,6 +112,29 @@ type codexItem struct {
 		Branch string `json:"branch"`
 	} `json:"git"`
 	Timestamp string `json:"timestamp"`
+	// event_msg token_count
+	Info *struct {
+		Total *codexTokens `json:"total_token_usage"`
+		Last  *codexTokens `json:"last_token_usage"`
+	} `json:"info"`
+}
+
+// codexTokens follows the Responses API: input includes cached input, and
+// output includes reasoning.
+type codexTokens struct {
+	Input     int64 `json:"input_tokens"`
+	Cached    int64 `json:"cached_input_tokens"`
+	Output    int64 `json:"output_tokens"`
+	Reasoning int64 `json:"reasoning_output_tokens"`
+	Total     int64 `json:"total_tokens"`
+}
+
+func (c *codexTokens) step(model string) step {
+	st := step{model: model}
+	st.CacheRead = min(c.Cached, c.Input)
+	st.Input = c.Input - st.CacheRead
+	st.Output, st.Reasoning = c.Output, c.Reasoning
+	return st
 }
 
 func (p *codexProvider) Parse(path string, full bool) (*Transcript, error) {
@@ -131,6 +154,7 @@ func (p *codexProvider) ParseLines(f io.Reader, path string, full bool) (*Transc
 	var fallback []Event // event_msg messages, used only if no response items carry text
 	fallbackPrompt := ""
 	sawItems := false
+	var lastTotal codexTokens
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
@@ -181,6 +205,23 @@ func (p *codexProvider) ParseLines(f io.Reader, path string, full bool) (*Transc
 			}
 			continue
 		case "event_msg":
+			// Codex reports usage after each model request: the request's own
+			// counts and the running total. It can repeat a report (when only
+			// the rate limits changed), so one whose total hasn't moved is
+			// skipped.
+			if it.Type == "token_count" && it.Info != nil && it.Info.Last != nil {
+				if tot := it.Info.Total; tot == nil || *tot != lastTotal {
+					if tot != nil {
+						lastTotal = *tot
+					}
+					ev := -1
+					if full {
+						ev = len(t.Events) - 1
+					}
+					t.addUsage(it.Info.Last.step(s.Model), ev)
+				}
+				continue
+			}
 			if it.Type == "user_message" || it.Type == "agent_message" {
 				role := "user"
 				if it.Type == "agent_message" {

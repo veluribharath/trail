@@ -67,9 +67,113 @@ type claudeLine struct {
 }
 
 type claudeMessage struct {
+	ID      string          `json:"id"`
 	Role    string          `json:"role"`
 	Model   string          `json:"model"`
 	Content json.RawMessage `json:"content"`
+	Usage   *claudeUsage    `json:"usage"`
+}
+
+// claudeUsage is the API's usage object, which Claude Code copies onto every
+// line it writes for a response (one line per content block).
+type claudeUsage struct {
+	InputTokens   int64 `json:"input_tokens"`
+	CacheCreation int64 `json:"cache_creation_input_tokens"`
+	CacheRead     int64 `json:"cache_read_input_tokens"`
+	OutputTokens  int64 `json:"output_tokens"`
+	OutputDetails struct {
+		ThinkingTokens int64 `json:"thinking_tokens"`
+	} `json:"output_tokens_details"`
+	CacheSplit *struct {
+		FiveMin int64 `json:"ephemeral_5m_input_tokens"`
+		OneHour int64 `json:"ephemeral_1h_input_tokens"`
+	} `json:"cache_creation"`
+	ServerToolUse struct {
+		WebSearch int64 `json:"web_search_requests"`
+	} `json:"server_tool_use"`
+	Speed        string `json:"speed"`
+	InferenceGeo string `json:"inference_geo"`
+}
+
+func (u *claudeUsage) step(model string) step {
+	st := step{model: model, fast: u.Speed == "fast", usOnly: u.InferenceGeo == "us", searches: u.ServerToolUse.WebSearch}
+	st.Input, st.CacheRead, st.Output = u.InputTokens, u.CacheRead, u.OutputTokens
+	st.Reasoning = u.OutputDetails.ThinkingTokens
+	st.CacheWrite = u.CacheCreation
+	if c := u.CacheSplit; c != nil && c.FiveMin+c.OneHour == u.CacheCreation {
+		st.CacheWrite, st.CacheWrite1h = c.FiveMin, c.OneHour
+	}
+	return st
+}
+
+// claudeUsages keeps one usage per response: the last line written for it,
+// since a response still streaming can be logged with partial counts.
+type claudeUsages struct {
+	order []string
+	byID  map[string]*claudeResponse
+}
+
+type claudeResponse struct {
+	st step
+	ev int // last event the response produced, or -1
+}
+
+func (c *claudeUsages) see(msg *claudeMessage, ev int) {
+	if msg.Usage == nil || strings.HasPrefix(msg.Model, "<") {
+		return
+	}
+	id := msg.ID
+	if id == "" {
+		id = "#" + itoa(len(c.order)) // no id to dedupe on: count each line
+	}
+	if c.byID == nil {
+		c.byID = map[string]*claudeResponse{}
+	}
+	r := c.byID[id]
+	if r == nil {
+		r = &claudeResponse{ev: -1}
+		c.byID[id] = r
+		c.order = append(c.order, id)
+	}
+	r.st = msg.Usage.step(msg.Model)
+	if ev >= 0 {
+		r.ev = ev
+	}
+}
+
+func (c *claudeUsages) apply(t *Transcript) {
+	for _, id := range c.order {
+		r := c.byID[id]
+		t.addUsage(r.st, r.ev)
+	}
+}
+
+// addClaudeSubagents adds the usage of subagent transcripts, which newer
+// versions keep in <session-id>/subagents/ next to the session file. Their
+// steps aren't shown, but what they cost belongs to the session.
+func addClaudeSubagents(t *Transcript, path string) {
+	files, _ := filepath.Glob(filepath.Join(strings.TrimSuffix(path, ".jsonl"), "subagents", "*.jsonl"))
+	for _, name := range files {
+		f, err := os.Open(name)
+		if err != nil {
+			continue
+		}
+		var us claudeUsages
+		sc := bufio.NewScanner(f)
+		sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
+		for sc.Scan() {
+			var ln claudeLine
+			if json.Unmarshal(sc.Bytes(), &ln) != nil || ln.Type != "assistant" || len(ln.Message) == 0 {
+				continue
+			}
+			var msg claudeMessage
+			if json.Unmarshal(ln.Message, &msg) == nil {
+				us.see(&msg, -1)
+			}
+		}
+		f.Close()
+		us.apply(t)
+	}
 }
 
 type claudeBlock struct {
@@ -103,6 +207,7 @@ func (p *claudeProvider) ParseLines(f io.Reader, path string, full bool) (*Trans
 	uuids := map[string]bool{}
 	type summary struct{ leaf, text string }
 	var summaries []summary
+	var usages claudeUsages
 
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
@@ -219,7 +324,12 @@ func (p *claudeProvider) ParseLines(f io.Reader, path string, full bool) (*Trans
 				}
 			}
 		}
+		if ln.Type == "assistant" {
+			usages.see(&msg, len(t.Events)-1)
+		}
 	}
+	usages.apply(t)
+	addClaudeSubagents(t, path)
 	if s.Cwd == "" {
 		s.Cwd = decodeClaudeDir(filepath.Base(filepath.Dir(path)))
 	}
