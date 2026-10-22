@@ -72,7 +72,7 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 
 OpenCode keeps every session in one SQLite database. trail reads it with a small built-in reader instead of a SQLite library: it opens the database and its `-wal` file read-only, takes no locks, and creates no files next to them, so it can't get in the way of a running OpenCode. A session that is being written shows up as of the last committed step.
 
-A session the agent wrote to in the last 10 minutes opens live: new steps appear as the agent works, marked Live in the header. Following a session can't interrupt it. Both agents only append whole lines to the session file, so trail checks the file's size about once a second and, when it grows, reads the complete lines and closes the file again. It never holds the file open or touches the agents' lock files.
+A session the agent wrote to in the last 10 minutes opens live: new steps appear as the agent works, marked Live in the header. Following a session can't interrupt it. Both agents only append whole lines to the session file, so trail checks the file's size about once a second and, when it grows, reads the complete lines and closes the file again. It never holds the file open or touches the agents' lock files. OpenCode sessions follow the same way, by checking the database about once a second; they update as each step is committed.
 
 Sessions are filed under their git repository. A session that ran in a linked worktree is filed under the main repository and labelled with the worktree. Folders that aren't repositories are filed as themselves.
 
