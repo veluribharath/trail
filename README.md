@@ -4,11 +4,11 @@ See what your coding agents did, folder by folder.
 
 ![trail showing a Claude Code session: the trace strip under the header, the transcript as a trail of steps on the left, and the diffs it made on the right](docs/screenshot.png)
 
-trail finds the sessions that Claude Code, Codex and OpenCode leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first.
+trail finds the sessions that Claude Code, Codex and OpenCode leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first. Any session can be [exported](#export-a-session) as one HTML file to share.
 
 Each session opens with a trace: one tick per step, prompts tall, edits amber, failures red. Drag across it to move through the transcript. Press ⌘K (Ctrl+K) to search: it matches session names, and everything said and run inside every transcript. Pick a match to open the session at that step, with every other matching step marked on the trace; `n` and `Shift+N` step through them. `/` filters the sidebar by name, and `j`/`k` step between sessions.
 
-It’s a single static Go binary with an embedded browser UI (fonts included, nothing loads from the network). It only reads agent storage, never writes to it, and makes no network calls unless you turn on [related sessions](#related-sessions-opt-in), which talk to an embedding model on your machine.
+It’s a single static Go binary with an embedded browser UI (fonts included, nothing loads from the network). It only reads agent storage, never writes to it, writes an export only where you save it, and makes no network calls unless you turn on [related sessions](#related-sessions-opt-in), which talk to an embedding model on your machine.
 
 ## Install
 
@@ -47,6 +47,7 @@ make build
 ./trail -open      # and open the browser
 ./trail -list      # print sessions by folder and exit
 ./trail -search "flaky login"   # print matching sessions and steps, and exit
+./trail -export c1 -o session.html   # write one session as an offline page, and exit
 ```
 
 On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop. Transcripts often contain secrets, so only do this on a network you trust (or tunnel the port over SSH instead).
@@ -61,6 +62,7 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | `-semantic` | off; see [Related sessions](#related-sessions-opt-in) |
 | `-embed-url` | `http://127.0.0.1:11434` (Ollama) |
 | `-embed-model` | `nomic-embed-text` |
+| `-export`, `-o` | off; see [Export a session](#export-a-session) |
 
 ## What it reads
 
@@ -113,6 +115,21 @@ What changes when you turn it on:
 
 Queries that use `in:`, `tool:` or `file:` stay word searches, since the vectors don't know about fields, tools or files.
 
+## Export a session
+
+Export saves one session as a single HTML file: the transcript, the trace, every diff, and the commits that touch files the session edited, with their patches. It opens from disk in any browser, with no trail running, and looks like trail without the sidebar. Press `/` to find text in it, and `n` and `Shift+N` to step through the matches.
+
+In the browser, open a session and choose Export, then Download HTML; your browser asks where to save it. From the command line:
+
+```
+./trail -export c1 -o session.html     # a session id, provider:id, or the start of an id
+./trail -export c1 > session.html
+```
+
+`trail -list` prints session ids. trail writes the file you name and nothing else; it's created readable only by you.
+
+Transcripts can contain secrets: API keys, tokens, environment variables, file contents and command output. Read the file before you share it. The file itself can't make any network request: its content security policy blocks everything but its own inlined script, styles and fonts, so opening it never loads or sends anything. Commits made in the session's window that don't touch its files are left out.
+
 ## How diffs and commits are matched
 
 The Edits tab comes straight from the transcript: each change is the before/after text the agent sent to its edit tool, so it is exact for that step. A Claude Code `Write` replaces the whole file, and the transcript doesn't say what was there before, so every line shows as added.
@@ -133,6 +150,7 @@ search.go    full-text index and queries
 semantic.go  opt-in related-session search over a local embedding model
 git.go       commits in the session window
 server.go    JSON API and embedded UI
+export.go    one session as a self-contained HTML file
 live.go      live updates for a session that is still being written
 web/         index.html, style.css, app.js (no build step)
 ```

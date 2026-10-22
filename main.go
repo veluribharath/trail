@@ -4,6 +4,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -46,6 +47,8 @@ func main() {
 	embedURL := flag.String("embed-url", "http://127.0.0.1:11434", "embedding server for -semantic: Ollama, or an OpenAI-compatible URL ending in /v1")
 	embedModel := flag.String("embed-model", "nomic-embed-text", "embedding model for -semantic")
 	forget := flag.Bool("forget", false, "delete the vectors -semantic cached and exit")
+	export := flag.String("export", "", "write one session (id, provider:id, or id prefix) as a single offline HTML file and exit")
+	out := flag.String("o", "", "file for -export to write; without it the page goes to standard output")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -74,6 +77,13 @@ func main() {
 
 	if *list {
 		printList(idx)
+		return
+	}
+	if *export != "" {
+		if err := exportSession(idx, *export, *out); err != nil {
+			fmt.Fprintln(os.Stderr, "trail:", err)
+			os.Exit(1)
+		}
 		return
 	}
 	srch := NewSearch(idx)
@@ -153,6 +163,43 @@ func printList(idx *Index) {
 				oneLine(s.Title, 60), s.Edits, s.ID)
 		}
 	}
+}
+
+// exportSession writes one session's page to the file the person named, or
+// to standard output when it isn't a terminal. Nothing else is written.
+func exportSession(idx *Index, arg, path string) error {
+	s, err := findSession(idx, arg)
+	if err != nil {
+		return err
+	}
+	t, err := idx.Load(s.Key)
+	if err != nil {
+		return err
+	}
+	if path == "" || path == "-" {
+		if fi, err := os.Stdout.Stat(); err == nil && fi.Mode()&os.ModeCharDevice != 0 {
+			return fmt.Errorf("-export writes HTML; name a file with -o %s, or redirect the output", exportName(s))
+		}
+		return ExportHTML(context.Background(), os.Stdout, t, homeDir(), currentVersion())
+	}
+	var b bytes.Buffer
+	if err := ExportHTML(context.Background(), &b, t, homeDir(), currentVersion()); err != nil {
+		return err
+	}
+	// Readable only by you: the file holds the whole transcript.
+	if err := os.WriteFile(path, b.Bytes(), 0o600); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "wrote %s (%s, %d steps)\n", path, byteSize(b.Len()), len(t.Events))
+	fmt.Fprintln(os.Stderr, "transcripts can contain secrets (keys, tokens, file contents, command output); read it before you share it")
+	return nil
+}
+
+func byteSize(n int) string {
+	if n < 1<<20 {
+		return fmt.Sprintf("%d KB", (n+1023)>>10)
+	}
+	return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
 }
 
 func printSearch(idx *Index, srch *Search, sem *Semantic, q string) {

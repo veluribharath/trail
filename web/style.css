@@ -271,6 +271,31 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .btn.done { border-color: var(--add); color: var(--add); }
 .btn.done svg { color: var(--add); }
 
+.btn.primary { background: var(--ink); border-color: var(--ink); color: var(--raised); }
+.btn.primary svg { color: var(--raised); }
+.btn.primary:hover { border-color: var(--ink); opacity: .92; }
+
+/* ---- export: the confirm dialog, and the page trail -export writes ---- */
+.dlg {
+  width: min(460px, calc(100vw - 32px)); padding: 22px 22px 18px; border: 1px solid var(--line); border-radius: var(--r-lg);
+  background: var(--raised); color: var(--ink); box-shadow: var(--shadow-pop);
+}
+.dlg::backdrop { background: var(--scrim); }
+.dlg h2 { margin: 0 0 8px; font-size: 16px; font-weight: 620; letter-spacing: -0.01em; }
+.dlg p { margin: 0 0 10px; color: var(--muted); font-size: 13.5px; line-height: 1.5; }
+.dlg .warn { padding: 10px 12px; border: 1px solid var(--blaze-line); border-radius: var(--r); background: var(--blaze-fill); color: var(--blaze-ink); }
+.dlg-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.app.exported { grid-template-columns: minmax(0, 1fr); }
+.find-in { position: relative; display: block; }
+.find-in svg { position: absolute; left: 9px; top: 50%; translate: 0 -50%; width: 14px; height: 14px; color: var(--faint); pointer-events: none; }
+.find-in input {
+  width: 220px; height: 32px; padding: 0 10px 0 30px; border: 1px solid var(--line); border-radius: var(--r);
+  background: var(--surface); color: var(--ink); font: inherit; font-size: 13px;
+}
+.find-in input::placeholder { color: var(--faint); }
+.find-in input:focus { outline: none; border-color: var(--blaze-line); box-shadow: 0 0 0 3px var(--blaze-fill); }
+.exported-on { display: inline-flex; align-items: center; height: 32px; color: var(--faint); font-size: 12.5px; white-space: nowrap; }
+
 /* ---- the trace: one tick per step, scrubbable ---- */
 .trace-wrap { padding: 0 28px 14px; border-bottom: 1px solid var(--line); }
 .trace {
@@ -518,6 +543,10 @@ details.tool svg.ic { color: var(--faint); }
   .icon-btn.menu { display: grid; position: absolute; top: 14px; left: 12px; z-index: 5; }
   .s-head { grid-template-columns: minmax(0, 1fr); padding: 16px 16px 12px 52px; }
   .s-head h1 { font-size: 19px; }
+  .exported .s-head { padding-left: 16px; }
+  .find-in, .find-in input { width: 100%; }
+  .actions { flex-wrap: wrap; }
+  .exported-on { height: auto; }
   .trace-wrap { padding: 0 16px 12px; }
   .trace-legend { display: none; }
   .home-inner { padding: 64px 18px 48px; }
