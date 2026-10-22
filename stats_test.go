@@ -11,7 +11,8 @@ func TestBuildStats(t *testing.T) {
 	sessions := []*Session{
 		{Key: "claude:a", Provider: "claude", Root: "/w/shop", Started: day(1), Ended: day(1), Edits: 3},
 		{Key: "claude:b", Provider: "claude", Root: "/w/shop", Worktree: "/w/shop-wt", Started: day(2), Ended: day(2), Edits: 1},
-		{Key: "codex:c", Provider: "codex", Root: "/w/api", Started: day(20), Ended: day(21)},
+		{Key: "codex:c", Provider: "codex", Root: "/w/api", Started: day(20), Ended: day(21),
+			Usage: &Usage{Input: 100, Output: 50, Cost: 0.25, Responses: 2}},
 		{Key: "codex:old", Provider: "codex", Root: "/w/api", Started: day(1).AddDate(0, -3, 0)},
 	}
 	per := map[string]*sessionStats{
@@ -43,6 +44,16 @@ func TestBuildStats(t *testing.T) {
 	}
 	if len(st.AgentRows) != 2 || st.AgentRows[0].Provider != "claude" {
 		t.Errorf("agents: %+v", st.AgentRows)
+	}
+	// Usage sums only sessions that recorded tokens.
+	if u := st.Totals.Usage; u == nil || u.Cost != 0.25 || u.Prompt()+u.Output != 150 {
+		t.Errorf("usage: %+v", u)
+	}
+	if b := st.Series[19]; b.CostByRoot["/w/api"] != 0.25 || b.TokensByRoot["/w/api"] != 150 {
+		t.Errorf("Oct 20 usage: %+v", b)
+	}
+	if st.ProjectRows[0].Usage != nil || st.ProjectRows[1].Usage == nil {
+		t.Errorf("project usage: %+v", st.ProjectRows)
 	}
 
 	// Filters by project and agent.
@@ -87,7 +98,8 @@ func TestBucketStart(t *testing.T) {
 // checks the counts the stats view gets from full transcripts.
 func TestStatsAPI(t *testing.T) {
 	idx := NewIndex(&claudeProvider{dir: "testdata/claude"}, &codexProvider{dir: "testdata/codex"},
-		&opencodeProvider{dir: "testdata/opencode"}, &geminiProvider{dir: "testdata/gemini"})
+		&opencodeProvider{dir: "testdata/opencode"}, &geminiProvider{dir: "testdata/gemini"},
+		&kiroProvider{dir: "testdata/kiro/home", dataDir: "testdata/kiro/data"})
 	idx.Scan(0)
 	srch := NewSearch(idx)
 	srch.Sync()
@@ -96,7 +108,7 @@ func TestStatsAPI(t *testing.T) {
 
 	var st Stats
 	getJSON(t, srv.URL+"/api/stats?days=all", &st)
-	if st.Read != st.Total || st.Total != 10 || st.Totals.Sessions != 10 {
+	if st.Read != st.Total || st.Total != 14 || st.Totals.Sessions != 14 {
 		t.Fatalf("read %d of %d, %d sessions", st.Read, st.Total, st.Totals.Sessions)
 	}
 	if st.Totals.Failed == 0 || st.Totals.Tools <= st.Totals.Failed {
@@ -106,7 +118,7 @@ func TestStatsAPI(t *testing.T) {
 	for _, a := range st.AgentRows {
 		providers[a.Provider] = true
 	}
-	for _, p := range []string{"claude", "codex", "opencode", "gemini"} {
+	for _, p := range []string{"claude", "codex", "opencode", "gemini", "kiro"} {
 		if !providers[p] {
 			t.Errorf("no stats for %s: %+v", p, st.AgentRows)
 		}
@@ -124,5 +136,27 @@ func TestStatsAPI(t *testing.T) {
 	getJSON(t, srv.URL+"/api/stats?days=all&agents=claude&root=/work/shop", &st)
 	if st.Totals.Sessions != 3 || len(st.AgentRows) != 1 {
 		t.Errorf("filtered: %+v %+v", st.Totals, st.AgentRows)
+	}
+}
+
+// TestStatsUsage checks token and cost totals from the usage fixtures.
+func TestStatsUsage(t *testing.T) {
+	idx := NewIndex(&claudeProvider{dir: "testdata/usage/claude"}, &codexProvider{dir: "testdata/usage/codex"}, &geminiProvider{dir: "testdata/usage/gemini"})
+	idx.Scan(0)
+	srch := NewSearch(idx)
+	srch.Sync()
+	st := (&Server{index: idx, search: srch}).stats("all", "", "")
+	u := st.Totals.Usage
+	if u == nil || u.Cost <= 0 || u.Prompt() == 0 || u.Output == 0 {
+		t.Fatalf("usage: %+v", u)
+	}
+	var sum float64
+	for _, a := range st.AgentRows {
+		if a.Usage != nil {
+			sum += a.Usage.Cost
+		}
+	}
+	if d := sum - u.Cost; d > 1e-9 || d < -1e-9 {
+		t.Errorf("agents add up to %v, total %v", sum, u.Cost)
 	}
 }

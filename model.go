@@ -73,6 +73,7 @@ type Session struct {
 	Edits               int       `json:"edits"`    // file changes recorded in the transcript
 	Files               []string  `json:"files,omitempty"`
 	Resume              string    `json:"resume,omitempty"`
+	Usage               *Usage    `json:"usage,omitempty"` // nil when the session recorded no token counts
 }
 
 // Transcript is a session with its full event stream.
@@ -98,6 +99,7 @@ type Event struct {
 	Error     bool      `json:"error,omitempty"`
 	Sidechain bool      `json:"sidechain,omitempty"` // subagent work inside the session
 	Changes   []int     `json:"changes,omitempty"`   // indices into Transcript.Changes
+	Usage     *Usage    `json:"usage,omitempty"`     // the model response that ended with this event
 	callID    string
 }
 

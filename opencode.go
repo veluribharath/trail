@@ -23,20 +23,11 @@ import (
 type opencodeProvider struct {
 	dir string
 
+	once     sync.Once
+	snaps    *sqliteSnapshots
 	mu       sync.Mutex
-	snap     *opencodeSnap
 	stamps   map[string]string // path -> stamp, from the last Discover
 	stampsDB *sqliteDB         // the snapshot stamps were read from
-}
-
-// opencodeSnap is one open, consistent view of the database. A new one is
-// opened when the database or its WAL changes; the old one is closed once
-// nothing is reading it.
-type opencodeSnap struct {
-	db    *sqliteDB
-	key   string
-	refs  int
-	stale bool
 }
 
 func (p *opencodeProvider) Name() string { return "opencode" }
@@ -45,42 +36,11 @@ func (p *opencodeProvider) dbPath() string {
 	return filepath.Join(p.dir, "opencode.db")
 }
 
-// acquire returns the current snapshot, opening a new one if the database
-// changed. Call the returned func when done reading.
+// acquire returns the current snapshot of the database. Call the returned
+// func when done reading.
 func (p *opencodeProvider) acquire() (*sqliteDB, func(), error) {
-	key := ""
-	for _, f := range []string{p.dbPath(), p.dbPath() + "-wal"} {
-		if fi, err := os.Stat(f); err == nil {
-			key += fmt.Sprintf("%d@%d;", fi.Size(), fi.ModTime().UnixNano())
-		} else {
-			key += "-;"
-		}
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.snap == nil || p.snap.key != key {
-		db, err := openSQLite(p.dbPath())
-		if err != nil {
-			return nil, nil, err
-		}
-		if old := p.snap; old != nil {
-			old.stale = true
-			if old.refs == 0 {
-				old.db.Close()
-			}
-		}
-		p.snap = &opencodeSnap{db: db, key: key}
-	}
-	s := p.snap
-	s.refs++
-	return s.db, func() {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		s.refs--
-		if s.stale && s.refs == 0 {
-			s.db.Close()
-		}
-	}, nil
+	p.once.Do(func() { p.snaps = &sqliteSnapshots{path: p.dbPath()} })
+	return p.snaps.acquire()
 }
 
 func (p *opencodeProvider) Discover() ([]string, error) {
@@ -233,8 +193,29 @@ type opencodeMessage struct {
 		Created   int64 `json:"created"`
 		Completed int64 `json:"completed"`
 	} `json:"time"`
+	Cost    float64         `json:"cost"`
+	Tokens  *opencodeTokens `json:"tokens"`
 	created int64
 	parts   []opencodePart
+}
+
+// opencodeTokens is how OpenCode records a step's usage: input excludes cache
+// reads and writes, and reasoning is counted apart from output.
+type opencodeTokens struct {
+	Input     int64 `json:"input"`
+	Output    int64 `json:"output"`
+	Reasoning int64 `json:"reasoning"`
+	Cache     struct {
+		Read  int64 `json:"read"`
+		Write int64 `json:"write"`
+	} `json:"cache"`
+}
+
+func (o *opencodeTokens) step(model string, cost float64) step {
+	st := step{model: model, recorded: cost}
+	st.Input, st.CacheRead, st.CacheWrite = o.Input, o.Cache.Read, o.Cache.Write
+	st.Output, st.Reasoning = o.Output+o.Reasoning, o.Reasoning
+	return st
 }
 
 type opencodePart struct {
@@ -244,7 +225,10 @@ type opencodePart struct {
 	Synthetic bool   `json:"synthetic"`
 	Ignored   bool   `json:"ignored"`
 	Tool      string `json:"tool"`
-	Time      struct {
+	// step-finish
+	Cost   float64         `json:"cost"`
+	Tokens *opencodeTokens `json:"tokens"`
+	Time   struct {
 		Start int64 `json:"start"`
 	} `json:"time"`
 	State struct {
@@ -347,6 +331,12 @@ func (p *opencodeProvider) addSession(db *sqliteDB, t *Transcript, id string, fu
 		if m.Role != "assistant" {
 			continue
 		}
+		// Usage goes on the turn's last own event, not on the steps of a
+		// subagent the turn started.
+		steps, mine := 0, -1
+		if full {
+			mine = len(t.Events) - 1
+		}
 		for _, pt := range m.parts {
 			pts := ts
 			if pt.Time.Start > 0 {
@@ -361,10 +351,19 @@ func (p *opencodeProvider) addSession(db *sqliteDB, t *Transcript, id string, fu
 				s.Messages++
 				if full {
 					t.Events = append(t.Events, Event{Kind: "assistant", Time: pts, Text: text, Sidechain: side})
+					mine = len(t.Events) - 1
 				}
 			case "reasoning":
 				if full && strings.TrimSpace(pt.Text) != "" {
 					t.Events = append(t.Events, Event{Kind: "thinking", Time: pts, Text: pt.Text, Sidechain: side})
+					mine = len(t.Events) - 1
+				}
+			case "step-finish":
+				// Each model request in a turn ends with one, carrying its
+				// usage and the cost OpenCode worked out for it.
+				if pt.Tokens != nil {
+					steps++
+					t.addUsage(pt.Tokens.step(m.ModelID, pt.Cost), mine)
 				}
 			case "tool":
 				st := pt.State
@@ -390,6 +389,7 @@ func (p *opencodeProvider) addSession(db *sqliteDB, t *Transcript, id string, fu
 					}
 					t.Events = append(t.Events, ev)
 					idx = len(t.Events) - 1
+					mine = idx
 				}
 				for _, c := range changes {
 					c.Time = pts
@@ -401,6 +401,10 @@ func (p *opencodeProvider) addSession(db *sqliteDB, t *Transcript, id string, fu
 					}
 				}
 			}
+		}
+		// Messages written before step parts existed carry the turn's total.
+		if steps == 0 && m.Tokens != nil {
+			t.addUsage(m.Tokens.step(m.ModelID, m.Cost), mine)
 		}
 	}
 	return nil

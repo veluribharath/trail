@@ -1,6 +1,6 @@
 "use strict";
 
-const PROVIDERS = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode", gemini: "Gemini CLI" };
+const PROVIDERS = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode", gemini: "Gemini CLI", kiro: "Kiro CLI" };
 const PER_FOLDER = 6;
 const WRITE_PREVIEW = 400;
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
@@ -38,6 +38,67 @@ async function api(path) {
   const body = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(body.error || `Request failed (${r.status})`);
   return body;
+}
+
+/* ---------------- tokens and cost ---------------- */
+// Costs are what the tokens would cost at API list prices. Someone on a
+// subscription pays a flat fee instead, so they are labelled API-equivalent,
+// and the person can show token counts instead.
+const usagePref = { tokens: (() => { try { return localStorage.getItem("trail.usage") === "tokens"; } catch { return false; } })() };
+function setUsagePref(tokens) {
+  usagePref.tokens = tokens;
+  try { localStorage.setItem("trail.usage", tokens ? "tokens" : "cost"); } catch {}
+  if (!EXPORTED) renderSidebar();
+  if (state.transcript && state.current) renderSession();
+  if (!EXPORTED && onStats() && dash.data) renderStats();
+}
+function fmtTokens(n) {
+  n = n || 0;
+  if (n < 1000) return String(n);
+  if (n < 1e6) return (n / 1e3).toFixed(n < 1e4 ? 1 : 0).replace(/\.0$/, "") + "K";
+  if (n < 1e9) return (n / 1e6).toFixed(n < 1e7 ? 1 : 0).replace(/\.0$/, "") + "M";
+  return (n / 1e9).toFixed(1).replace(/\.0$/, "") + "B";
+}
+function fmtCost(c) {
+  if (!(c > 0)) return "$0";
+  if (c < 0.01) return "<$0.01";
+  if (c < 100) return "$" + c.toFixed(2);
+  return "$" + Math.round(c).toLocaleString();
+}
+const promptTokens = (u) => (u.input || 0) + (u.cacheRead || 0) + (u.cacheWrite || 0) + (u.cacheWrite1h || 0);
+const totalTokens = (u) => promptTokens(u) + (u.output || 0);
+// hitRate is the share of the prompt read from cache, as a label.
+function hitRate(u) {
+  const p = promptTokens(u), r = p ? (100 * (u.cacheRead || 0)) / p : 0;
+  return r > 0 && r < 1 ? "<1%" : Math.round(r) + "%";
+}
+// costLabel is the short figure for a usage: its cost, "≥" when some
+// responses had no price, or "—" when none did.
+function costLabel(u) {
+  if (u.unpriced && !(u.cost > 0)) return "—";
+  return (u.unpriced ? "≥ " : "") + fmtCost(u.cost);
+}
+function usageShort(u) { return usagePref.tokens ? fmtTokens(totalTokens(u)) + " tok" : costLabel(u); }
+function unpricedNote(u) {
+  if (!u.unpriced) return "";
+  const models = (u.unpricedModels || []).join(", ") || "its model";
+  return `${plural(u.unpriced, "response")} not priced: no price for ${models}. Add one with a prices.json override (see trail -prices).`;
+}
+// usageLines is the full breakdown, for tooltips.
+function usageLines(u, step) {
+  const prompt = promptTokens(u);
+  const lines = [
+    `${step ? "Prompt" : "Read"}: ${prompt.toLocaleString()} tokens`,
+    `  fresh input ${(u.input || 0).toLocaleString()}`,
+  ];
+  if (u.cacheRead) lines.push(`  cache hits ${u.cacheRead.toLocaleString()}${prompt ? ` (${hitRate(u)})` : ""}`);
+  if (u.cacheWrite) lines.push(`  cache writes ${u.cacheWrite.toLocaleString()}${u.cacheWrite1h ? " (5 min)" : ""}`);
+  if (u.cacheWrite1h) lines.push(`  cache writes ${u.cacheWrite1h.toLocaleString()} (1 hour)`);
+  lines.push(`Output: ${(u.output || 0).toLocaleString()} tokens${u.reasoning ? `, ${u.reasoning.toLocaleString()} of them thinking` : ""}`);
+  if (!step && u.context) lines.push(`Largest prompt: ${u.context.toLocaleString()} tokens`);
+  if (!(u.unpriced && !(u.cost > 0))) lines.push(`API-equivalent cost: ${u.unpriced ? "at least " : ""}${u.cost < 0.01 && u.cost > 0 ? "$" + u.cost.toFixed(4) : fmtCost(u.cost)}`);
+  if (u.unpriced) lines.push(unpricedNote(u));
+  return lines.join("\n");
 }
 
 /* ---------------- icons ---------------- */
@@ -150,10 +211,20 @@ function buildTree(sessions) {
   const stats = (node) => {
     node.count = node.sessions.length;
     node.latest = node.sessions.reduce((m, s) => (s.ended > m ? s.ended : m), "");
+    node.usage = null;
+    const addUsage = (u) => {
+      if (!u) return;
+      const n = (node.usage ||= { input: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, output: 0, reasoning: 0, cost: 0, unpriced: 0, unpricedModels: [] });
+      for (const k of ["input", "cacheRead", "cacheWrite", "cacheWrite1h", "output", "reasoning", "cost", "unpriced"]) n[k] += u[k] || 0;
+      n.context = Math.max(n.context || 0, u.context || 0);
+      for (const m of u.unpricedModels || []) if (!n.unpricedModels.includes(m)) n.unpricedModels.push(m);
+    };
+    for (const s of node.sessions) addUsage(s.usage);
     for (const kid of node.kids.values()) {
       stats(kid);
       node.count += kid.count;
       if (kid.latest > node.latest) node.latest = kid.latest;
+      addUsage(kid.usage);
     }
   };
   stats(root);
@@ -181,7 +252,7 @@ function renderSidebar() {
   const sessions = visibleSessions();
   tree.innerHTML = "";
   if (!state.data.sessions.length) {
-    tree.append(h(`<div class="empty">No sessions yet. Run Claude Code, Codex, OpenCode or Gemini CLI in a project, then rescan.</div>`));
+    tree.append(h(`<div class="empty">No sessions yet. Run Claude Code, Codex, OpenCode, Gemini CLI or Kiro CLI in a project, then rescan.</div>`));
     return;
   }
   if (!sessions.length) {
@@ -198,7 +269,7 @@ function renderSidebar() {
     const last = slash > 0 ? node.name.slice(slash + 1) : node.name;
     const el = h(`<div class="folder" aria-expanded="${open}">
       <button class="folder-row" title="${esc(node.path)}">${svg("down", "chev")}${svg("folder", "ficon")}
-        <span class="name"><span class="pre">${esc(pre)}</span>${esc(last)}</span><span class="count">${node.count}</span>
+        <span class="name"><span class="pre">${esc(pre)}</span>${esc(last)}</span>${node.usage ? `<span class="fcost" title="${esc((usagePref.tokens ? "Tokens" : "API-equivalent cost") + " of every session in this folder\n\n" + usageLines(node.usage))}">${esc(usageShort(node.usage))}</span>` : ""}<span class="count">${node.count}</span>
       </button><div class="kids"></div></div>`);
     $(".folder-row", el).onclick = () => {
       const now = el.getAttribute("aria-expanded") !== "true";
@@ -237,6 +308,7 @@ function sessionRow(s) {
   else if (s.cwd !== s.root) bits.push(`<span>${esc(tildify(s.cwd).replace(tildify(s.root) + "/", ""))}/</span>`);
   if (s.branch) bits.push(`<span>${esc(s.branch)}</span>`);
   if (s.edits) bits.push(`<span class="edits">${plural(s.edits, "edit")}</span>`);
+  if (s.usage) bits.push(`<span class="cost">${esc(usageShort(s.usage))}</span>`);
   const tip = s.titleKind !== "prompt" && s.prompt ? `${s.title}\n\n${s.prompt}` : s.prompt || s.title;
   const el = h(`<button class="sess" data-key="${esc(s.key)}" aria-current="${s.key === state.current}" title="${esc(tip)}">
     <span class="pmark ${esc(s.provider)}" aria-label="${esc(PROVIDERS[s.provider] || s.provider)}"></span>
@@ -260,7 +332,7 @@ function renderHome() {
   view.innerHTML = "";
   if (!d.sessions.length) {
     view.append(h(`<div class="home"><div class="home-inner"><h1>No sessions yet</h1>
-      <p class="lede">trail reads the sessions Claude Code, Codex, OpenCode and Gemini CLI keep on this machine. Run any of them in a project, then rescan.</p>
+      <p class="lede">trail reads the sessions Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI keep on this machine. Run any of them in a project, then rescan.</p>
       <h2>Where trail looks</h2><div class="sources"></div></div></div>`));
   } else {
     view.append(h(`<div class="home"><div class="home-inner">
@@ -411,6 +483,18 @@ function sessionHeader() {
     t.changes.length ? `<span class="blz"><b>${t.changes.length}</b> ${t.changes.length === 1 ? "edit" : "edits"} in <b>${st.files}</b> ${st.files === 1 ? "file" : "files"}</span>` : `<span>No edits</span>`,
     st.failed ? `<span class="bad"><b>${st.failed}</b> failed</span>` : "",
   ].join("");
+  const u = s.usage;
+  const usage = u ? `<div class="usage" title="${esc(usageLines(u))}">
+      <span class="u-main">${usagePref.tokens
+        ? `<b>${esc(fmtTokens(totalTokens(u)))}</b> tokens`
+        : `<b>${esc(costLabel(u))}</b> API-equivalent`}</span>
+      <span><b>${esc(fmtTokens(promptTokens(u)))}</b> in</span>
+      ${u.cacheRead ? `<span><b>${hitRate(u)}</b> cache hits</span>` : ""}
+      <span><b>${esc(fmtTokens(u.output))}</b> out${u.reasoning ? ` (${esc(fmtTokens(u.reasoning))} thinking)` : ""}</span>
+      <span>${plural(u.responses, "response")}</span>
+      ${u.unpriced ? `<span class="warn">${plural(u.unpriced, "response")} not priced</span>` : ""}
+      <button class="linkish" id="usage-toggle">${usagePref.tokens ? "Show cost" : "Show tokens"}</button>
+    </div>` : "";
 
   const head = h(`<header class="s-head">
       <div class="titles">
@@ -418,9 +502,12 @@ function sessionHeader() {
         ${named && s.prompt ? `<p class="first-prompt" title="${esc(s.prompt)}">${esc(s.prompt)}</p>` : ""}
         <div class="meta">${meta}</div>
         <div class="facts">${facts}</div>
+        ${usage}
       </div>
       <div class="actions">${EXPORTED ? exportedActions() : `<span class="live" ${live.on ? "" : "hidden"} title="The agent is still writing this session. New steps appear as it works.">Live</span><button class="btn" id="export" title="Save this session as one HTML file">${svg("download")}<span>Export</span></button><button class="btn" id="copy" title="${esc(s.resume)}">${svg("copy")}<span>Copy resume command</span></button>`}</div>
     </header>`);
+  const tog = $("#usage-toggle", head);
+  if (tog) tog.onclick = (e) => { e.stopPropagation(); setUsagePref(!usagePref.tokens); };
   if (EXPORTED) { setupExportFind(head); return head; }
   $("#export", head).onclick = () => exportDialog(s);
   $("#copy", head).onclick = async (e) => {
@@ -617,6 +704,14 @@ function renderLog(root, from = 0) {
         }
         body.append(links);
       }
+    }
+    if (e.usage) {
+      const u = e.usage;
+      body.append(h(`<div class="step-usage" title="${esc(usageLines(u, true))}">
+        <span>${esc(fmtTokens(promptTokens(u)))} in${u.cacheRead ? ` · ${hitRate(u)} cached` : ""}</span>
+        <span>${esc(fmtTokens(u.output))} out</span>
+        ${usagePref.tokens ? "" : `<span class="c">${esc(costLabel(u))}</span>`}
+        ${u.responses > 1 ? `<span>${u.responses} responses</span>` : ""}</div>`));
     }
     frag.append(row);
   });
@@ -1283,11 +1378,13 @@ function renderStats() {
   if (reading) body.append(h(`<p class="stats-note">Reading transcripts: ${d.read} of ${d.total}. Tool calls and files fill in as they are read.</p>`));
 
   const per = { day: "day", week: "week", month: "month" }[d.bucket];
+  const u = t.usage;
   body.append(h(`<div class="tiles">
-    <div class="tile"><span class="label">Sessions</span><span class="value">${compact(t.sessions)}</span><span class="sub">on ${plural(t.activeDays, "day")}</span></div>
-    <div class="tile"><span class="label">Projects</span><span class="value">${compact(t.projects)}</span><span class="sub">${plural(d.agents.length, "agent")}</span></div>
+    <div class="tile"><span class="label">Sessions</span><span class="value">${compact(t.sessions)}</span><span class="sub">${u ? `in ${plural(t.projects, "project")}, ` : ""}on ${plural(t.activeDays, "day")}</span></div>
+    ${u ? "" : `<div class="tile"><span class="label">Projects</span><span class="value">${compact(t.projects)}</span><span class="sub">${plural(d.agents.length, "agent")}</span></div>`}
     <div class="tile"><span class="label">Edits</span><span class="value">${compact(t.edits)}</span><span class="sub">to ${plural(t.files, "file")}</span></div>
     <div class="tile"><span class="label">Failed tool calls</span><span class="value">${rate(t.failed, t.tools)}</span><span class="sub">${compact(t.failed)} of ${plural(t.tools, "call")}</span></div>
+    ${u ? `<div class="tile" title="${esc(usageLines(u))}"><span class="label">${usagePref.tokens ? "Tokens" : "API-equivalent cost"}</span><span class="value">${esc(usagePref.tokens ? fmtTokens(totalTokens(u)) : costLabel(u))}</span><span class="sub">${esc(usagePref.tokens ? costLabel(u) + " API-equivalent" : fmtTokens(totalTokens(u)) + " tokens")}</span></div>` : ""}
   </div>`));
 
   // Sessions over time, stacked by project.
@@ -1306,8 +1403,31 @@ function renderStats() {
   const drawSessions = () => {
     const box = $(".card-body", sessCard);
     if (dash.table.has("sessions")) return tableView(box, [d.bucket[0].toUpperCase() + d.bucket.slice(1), ...series.map((s) => s.name), "Total"], rows.filter((r) => r.total).map((r) => [r.long, ...r.vals, r.total]));
-    stackedColumns(box, rows, series);
+    stackedColumns(box, rows, series, { fmt: compact, total: (v) => plural(v, "session") });
   };
+
+  // Tokens or API-equivalent cost over time, stacked the same way.
+  let drawUsage = () => {};
+  const usageCard = u && card("usage", `${usagePref.tokens ? "Tokens" : "API-equivalent cost"} per ${per}`,
+    `<p class="card-sub">${usagePref.tokens ? "Tokens read and written" : "What the tokens would cost at API list prices"}${u.unpriced ? "; some models have no price, so this is a floor" : ""}. <button class="linkish" data-usage>${usagePref.tokens ? "Show cost" : "Show tokens"}</button></p>`);
+  if (usageCard) {
+    body.append(usageCard);
+    $("[data-usage]", usageCard).onclick = () => setUsagePref(!usagePref.tokens);
+    const key = usagePref.tokens ? "tokensByRoot" : "costByRoot";
+    const fmt = usagePref.tokens ? fmtTokens : (v) => (v > 0 && v < 1 ? "$" + v.toFixed(2).replace(/^0/, "") : fmtCost(v).replace(/\.00$/, ""));
+    const uRows = d.series.map((b) => {
+      const by = b[key] || {};
+      const vals = named.map((r) => by[r] || 0);
+      if (otherRoots) vals.push(Object.entries(by).reduce((n, [r, v]) => (named.includes(r) ? n : n + v), 0));
+      return { label: bucketLabel(b.start, d.bucket), long: bucketLabel(b.start, d.bucket, true), vals, total: vals.reduce((a, v) => a + v, 0) };
+    });
+    const show = usagePref.tokens ? fmtTokens : fmtCost;
+    drawUsage = () => {
+      const box = $(".card-body", usageCard);
+      if (dash.table.has("usage")) return tableView(box, [d.bucket[0].toUpperCase() + d.bucket.slice(1), ...series.map((s) => s.name), "Total"], uRows.filter((r) => r.total).map((r) => [r.long, ...r.vals.map(show), show(r.total)]));
+      stackedColumns(box, uRows, series, { fmt, total: (v) => (usagePref.tokens ? fmtTokens(v) + " tokens" : fmtCost(v)), value: show });
+    };
+  }
 
   // Failure rate over time.
   const failRows = d.series.map((b) => ({ label: bucketLabel(b.start, d.bucket), long: bucketLabel(b.start, d.bucket, true), tools: b.tools, failed: b.failed }));
@@ -1345,11 +1465,11 @@ function renderStats() {
   // Projects and agents, as tables: they are the table view for the tiles.
   if (!dash.root) {
     const projCard = card("projects", "Projects", "", false);
-    const tb = h(`<table class="stats-table"><thead><tr><th>Project</th><th>Sessions</th><th>Edits</th><th>Failed calls</th><th>Last session</th></tr></thead><tbody></tbody></table>`);
+    const tb = h(`<table class="stats-table"><thead><tr><th>Project</th><th>Sessions</th><th>Edits</th><th>Failed calls</th>${u ? `<th>${usagePref.tokens ? "Tokens" : "Cost"}</th>` : ""}<th>Last session</th></tr></thead><tbody></tbody></table>`);
     for (const p of d.projects) {
       const c = colors.get(p.root);
       const tr = h(`<tr tabindex="0" title="Show only ${esc(tildify(p.root))}"><td><span class="cell"><span class="key ${c ? "s" + c : "other"}"></span><span class="proj">${esc(tildify(p.root))}</span></span></td>
-        <td>${p.sessions}</td><td>${p.edits}</td><td>${rate(p.failed, p.tools)}</td><td>${esc(ago(p.last))}</td></tr>`);
+        <td>${p.sessions}</td><td>${p.edits}</td><td>${rate(p.failed, p.tools)}</td>${u ? `<td>${p.usage ? esc(usageShort(p.usage)) : "—"}</td>` : ""}<td>${esc(ago(p.last))}</td></tr>`);
       const pick = () => { dash.root = p.root; history.replaceState(null, "", statsHash()); loadStats(); $(".stats").scrollTop = 0; };
       tr.onclick = pick;
       tr.onkeydown = (e) => { if (e.key === "Enter") pick(); };
@@ -1359,17 +1479,18 @@ function renderStats() {
     body.append(projCard);
   }
   const agentCard = card("agents", "Agents", "", false);
-  const ta = h(`<table class="stats-table"><thead><tr><th>Agent</th><th>Sessions</th><th>Edits</th><th>Tool calls</th><th>Failed calls</th></tr></thead><tbody></tbody></table>`);
+  const ta = h(`<table class="stats-table"><thead><tr><th>Agent</th><th>Sessions</th><th>Edits</th><th>Tool calls</th><th>Failed calls</th>${u ? `<th>${usagePref.tokens ? "Tokens" : "Cost"}</th>` : ""}</tr></thead><tbody></tbody></table>`);
   for (const a of d.agents) {
     $("tbody", ta).append(h(`<tr><td><span class="cell"><span class="pmark ${esc(a.provider)}"></span>${esc(PROVIDERS[a.provider] || a.provider)}</span></td>
-      <td>${a.sessions}</td><td>${a.edits}</td><td>${a.tools}</td><td>${rate(a.failed, a.tools)}</td></tr>`));
+      <td>${a.sessions}</td><td>${a.edits}</td><td>${a.tools}</td><td>${rate(a.failed, a.tools)}</td>${u ? `<td>${a.usage ? esc(usageShort(a.usage)) : "—"}</td>` : ""}</tr>`));
   }
   $(".card-body", agentCard).append(ta);
   body.append(agentCard);
 
-  const draw = () => { drawSessions(); drawFailures(); };
+  const draw = () => { drawSessions(); drawUsage(); drawFailures(); };
   draw();
-  for (const [name, c, fn] of [["sessions", sessCard, drawSessions], ["failures", failCard, drawFailures]]) {
+  for (const [name, c, fn] of [["sessions", sessCard, drawSessions], ["usage", usageCard, drawUsage], ["failures", failCard, drawFailures]]) {
+    if (!c) continue;
     const b = $(".card-toggle", c);
     b.onclick = () => {
       dash.table.has(name) ? dash.table.delete(name) : dash.table.add(name);
@@ -1463,17 +1584,20 @@ function showTip(html, x, y) {
 }
 const hideTip = () => { $("#tip").hidden = true; };
 
-function stackedColumns(box, rows, series) {
+// stackedColumns draws one column per bucket. opts.fmt labels the axis,
+// opts.total the column's total and opts.value each series in the tooltip.
+function stackedColumns(box, rows, series, opts) {
+  const value = opts.value || String;
   const f = chartFrame(box, 240);
   const { max, step } = niceMax(Math.max(...rows.map((r) => r.total)));
-  yAxis(f, max, step, compact);
+  yAxis(f, max, step, opts.fmt);
   const band = f.iw / rows.length, bw = Math.max(2, Math.min(24, band * 0.62));
   const x = (i) => f.pad.l + band * i + band / 2;
   xLabels(f, rows, x);
   const y = (v) => (v / max) * f.ih;
   const g = sv("g", {}, f.svgEl);
   rows.forEach((r, i) => {
-    const col = sv("g", { class: "col", tabindex: 0, "aria-label": `${r.long}: ${plural(r.total, "session")}` }, g);
+    const col = sv("g", { class: "col", tabindex: 0, "aria-label": `${r.long}: ${opts.total(r.total)}` }, g);
     sv("rect", { class: "hit", x: f.pad.l + band * i, y: f.pad.t, width: band, height: f.ih }, col);
     let top = f.pad.t + f.ih;
     const segs = r.vals.map((v, si) => ({ v, si })).filter((s) => s.v > 0);
@@ -1484,9 +1608,9 @@ function stackedColumns(box, rows, series) {
       sv(last ? "path" : "rect", last ? { d: roundTop(x(i) - bw / 2, top, bw, hgt, 4), class: `seg ${series[si].cls}` } : { x: x(i) - bw / 2, y: top, width: bw, height: hgt, class: `seg ${series[si].cls}` }, col);
     });
     const tip = () => {
-      const lines = series.map((s, si) => (r.vals[si] ? `<div class="tip-row"><span class="tip-key ${s.cls}"></span><b>${r.vals[si]}</b> <span class="k">${esc(s.name)}</span></div>` : "")).join("");
+      const lines = series.map((s, si) => (r.vals[si] ? `<div class="tip-row"><span class="tip-key ${s.cls}"></span><b>${esc(value(r.vals[si]))}</b> <span class="k">${esc(s.name)}</span></div>` : "")).join("");
       const b = col.getBoundingClientRect();
-      showTip(`<div class="k">${esc(r.long)}</div><div><b>${plural(r.total, "session")}</b></div>${lines}`, b.left + b.width / 2, b.top + f.ih - y(r.total));
+      showTip(`<div class="k">${esc(r.long)}</div><div><b>${esc(opts.total(r.total))}</b></div>${lines}`, b.left + b.width / 2, b.top + f.ih - y(r.total));
     };
     col.addEventListener("pointerenter", tip);
     col.addEventListener("focus", tip);

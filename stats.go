@@ -92,14 +92,20 @@ type StatsTotals struct {
 	Files      int `json:"files"` // distinct files edited
 	Tools      int `json:"tools"`
 	Failed     int `json:"failed"`
+	// Usage sums the tokens and API-equivalent cost of sessions that
+	// recorded any; nil when none did.
+	Usage *Usage `json:"usage,omitempty"`
 }
 
-// StatsBucket is one day, week or month. ByRoot counts sessions per project.
+// StatsBucket is one day, week or month. ByRoot counts sessions per project;
+// CostByRoot and TokensByRoot are their usage.
 type StatsBucket struct {
-	Start  time.Time      `json:"start"`
-	ByRoot map[string]int `json:"byRoot"`
-	Tools  int            `json:"tools"`
-	Failed int            `json:"failed"`
+	Start        time.Time          `json:"start"`
+	ByRoot       map[string]int     `json:"byRoot"`
+	CostByRoot   map[string]float64 `json:"costByRoot,omitempty"`
+	TokensByRoot map[string]int64   `json:"tokensByRoot,omitempty"`
+	Tools        int                `json:"tools"`
+	Failed       int                `json:"failed"`
 }
 
 type StatsProject struct {
@@ -109,6 +115,7 @@ type StatsProject struct {
 	Tools    int       `json:"tools"`
 	Failed   int       `json:"failed"`
 	Last     time.Time `json:"last"`
+	Usage    *Usage    `json:"usage,omitempty"`
 }
 
 type StatsFile struct {
@@ -131,6 +138,7 @@ type StatsAgent struct {
 	Edits    int    `json:"edits"`
 	Tools    int    `json:"tools"`
 	Failed   int    `json:"failed"`
+	Usage    *Usage `json:"usage,omitempty"`
 }
 
 const (
@@ -206,6 +214,18 @@ func BuildStats(sessions []*Session, per map[string]*sessionStats, q StatsQuery)
 		b := buckets[bucketStart(at, st.Bucket).Unix()]
 		if b != nil {
 			b.ByRoot[s.Root]++
+		}
+		if u := s.Usage; u != nil {
+			addUsageTo(&st.Totals.Usage, u)
+			addUsageTo(&p.Usage, u)
+			addUsageTo(&a.Usage, u)
+			if b != nil {
+				if b.CostByRoot == nil {
+					b.CostByRoot, b.TokensByRoot = map[string]float64{}, map[string]int64{}
+				}
+				b.CostByRoot[s.Root] += u.Cost
+				b.TokensByRoot[s.Root] += u.Prompt() + u.Output
+			}
 		}
 
 		ss := per[s.Key]
@@ -317,6 +337,14 @@ func BuildStats(sessions []*Session, per map[string]*sessionStats, q StatsQuery)
 	return st
 }
 
+// addUsageTo adds u into *dst, allocating it on first use.
+func addUsageTo(dst **Usage, u *Usage) {
+	if *dst == nil {
+		*dst = &Usage{}
+	}
+	(*dst).add(*u)
+}
+
 func sessionStart(s *Session) time.Time {
 	if !s.Started.IsZero() {
 		return s.Started
@@ -389,6 +417,9 @@ func printStats(st *Stats, days, home string) {
 	fmt.Fprintf(w, "  %s in %s on %s; %s to %s\n", count(t.Sessions, "session"), count(t.Projects, "project"),
 		count(t.ActiveDays, "day"), count(t.Edits, "edit"), count(t.Files, "file"))
 	fmt.Fprintf(w, "  %s, %d failed (%s)\n", count(t.Tools, "tool call"), t.Failed, pct(t.Failed, t.Tools))
+	if u := t.Usage; u != nil {
+		fmt.Fprintf(w, "  %s tokens, %s API-equivalent\n", tokensHuman(u.Prompt()+u.Output), costText(u))
+	}
 
 	short := func(root string) string {
 		if home != "" && strings.HasPrefix(root, home+string(filepath.Separator)) {
@@ -427,6 +458,31 @@ func printStats(st *Stats, days, home string) {
 
 func count(n int, one string) string {
 	return strconv.Itoa(n) + " " + plural(n, one, one+"s")
+}
+
+// costText is a usage's cost, marked as a floor when some responses had no
+// price.
+func costText(u *Usage) string {
+	if u.Unpriced > 0 && u.Cost == 0 {
+		return "no price for " + strings.Join(u.UnpricedModels, ", ") + ", so no cost"
+	}
+	c := fmt.Sprintf("$%.2f", u.Cost)
+	if u.Unpriced > 0 {
+		c = "at least " + c
+	}
+	return c
+}
+
+func tokensHuman(n int64) string {
+	switch {
+	case n >= 1e9:
+		return strconv.FormatFloat(float64(n)/1e9, 'f', 1, 64) + "B"
+	case n >= 1e6:
+		return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
+	case n >= 1e4:
+		return strconv.FormatInt(n/1000, 10) + "K"
+	}
+	return strconv.FormatInt(n, 10)
 }
 
 func failRate(failed, tools int) string {

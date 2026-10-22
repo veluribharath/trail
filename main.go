@@ -1,5 +1,5 @@
 // trail is a read-only browser for coding-agent sessions. It finds the session
-// logs that Claude Code, Codex, OpenCode and Gemini CLI leave on disk, files them under the project
+// logs that Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI leave on disk, files them under the project
 // folders they ran in, and shows each transcript next to the changes it made.
 package main
 
@@ -41,6 +41,8 @@ func main() {
 	codexDir := flag.String("codex-dir", envOr("CODEX_HOME", filepath.Join(homeDir(), ".codex")), "Codex home directory")
 	geminiDir := flag.String("gemini-dir", filepath.Join(envOr("GEMINI_CLI_HOME", homeDir()), ".gemini"), "Gemini CLI directory")
 	opencodeDir := flag.String("opencode-dir", filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(homeDir(), ".local", "share")), "opencode"), "OpenCode data directory (holds opencode.db)")
+	kiroDir := flag.String("kiro-dir", filepath.Join(homeDir(), ".kiro"), "Kiro CLI directory (holds sessions/)")
+	kiroDataDir := flag.String("kiro-data-dir", kiroDefaultDataDir(), "Kiro CLI data directory (holds data.sqlite3)")
 	open := flag.Bool("open", false, "open the browser after starting")
 	list := flag.Bool("list", false, "print sessions grouped by folder and exit")
 	search := flag.String("search", "", "print sessions whose transcripts match a query and exit")
@@ -48,11 +50,20 @@ func main() {
 	embedURL := flag.String("embed-url", "http://127.0.0.1:11434", "embedding server for -semantic: Ollama, or an OpenAI-compatible URL ending in /v1")
 	embedModel := flag.String("embed-model", "nomic-embed-text", "embedding model for -semantic")
 	forget := flag.Bool("forget", false, "delete the vectors -semantic cached and exit")
+	showPrices := flag.Bool("prices", false, "print the token prices used for API-equivalent costs and exit")
 	stats := flag.String("stats", "", "print activity for the last N days (or all) and exit")
 	export := flag.String("export", "", "write one session (id, provider:id, or id prefix) as a single offline HTML file and exit")
 	out := flag.String("o", "", "file for -export to write; without it the page goes to standard output")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+
+	if err := loadPriceOverrides(pricesPath()); err != nil {
+		fmt.Fprintln(os.Stderr, "trail: ignoring price overrides:", err)
+	}
+	if *showPrices {
+		printPrices(os.Stdout)
+		return
+	}
 
 	if *showVersion {
 		fmt.Println("trail", currentVersion())
@@ -73,7 +84,8 @@ func main() {
 		return
 	}
 
-	idx := NewIndex(&claudeProvider{dir: *claudeDir}, &codexProvider{dir: *codexDir}, &opencodeProvider{dir: *opencodeDir}, &geminiProvider{dir: *geminiDir})
+	idx := NewIndex(&claudeProvider{dir: *claudeDir}, &codexProvider{dir: *codexDir}, &opencodeProvider{dir: *opencodeDir}, &geminiProvider{dir: *geminiDir},
+		&kiroProvider{dir: *kiroDir, dataDir: *kiroDataDir})
 	start := time.Now()
 	status := idx.Scan(0)
 
@@ -253,6 +265,18 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// kiroDefaultDataDir is where kiro-cli keeps data.sqlite3: the platform's
+// local data directory.
+func kiroDefaultDataDir() string {
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(homeDir(), "Library", "Application Support", "kiro-cli")
+	case "windows":
+		return filepath.Join(envOr("LOCALAPPDATA", filepath.Join(homeDir(), "AppData", "Local")), "kiro-cli")
+	}
+	return filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(homeDir(), ".local", "share")), "kiro-cli")
 }
 
 func envOr(key, def string) string {

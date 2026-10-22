@@ -1,0 +1,5 @@
+{"sessionId": "2b3c4d5e-0000-4000-8000-000000000002", "projectHash": "def", "startTime": "2026-10-20T12:00:00.000Z", "lastUpdated": "2026-10-20T12:00:00.000Z", "kind": "main"}
+{"id": "m1", "timestamp": "2026-10-20T12:00:01.000Z", "type": "user", "content": [{"text": "Count the tokens"}]}
+{"id": "m2", "timestamp": "2026-10-20T12:00:02.000Z", "type": "gemini", "content": "Reading.", "model": "gemini-2.5-pro", "tokens": {"input": 1, "output": 1, "cached": 0, "thoughts": 0, "tool": 0, "total": 2}}
+{"id": "m2", "timestamp": "2026-10-20T12:00:02.000Z", "type": "gemini", "content": "Reading a long prompt.", "model": "gemini-2.5-pro", "tokens": {"input": 250000, "output": 1000, "cached": 50000, "thoughts": 500, "tool": 0, "total": 251500}}
+{"id": "m3", "timestamp": "2026-10-20T12:00:03.000Z", "type": "gemini", "content": "Done.", "model": "gemini-2.5-flash", "tokens": {"input": 1000, "output": 100, "cached": 0, "thoughts": 0, "tool": 0, "total": 1100}}
