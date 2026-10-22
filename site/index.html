@@ -42,8 +42,8 @@
       <p class="clarify">Each project is the folder a session ran in: its git repository, or the folder itself when it isn't one.</p>
       <div class="cta">
         <a class="btn primary" href="https://github.com/veluribharath/trail/releases/latest">Download for macOS &amp; Linux</a>
-        <div class="cmd" data-copy="go install github.com/veluribharath/trail@latest">
-          <code><span class="prompt">$</span> go install github.com/veluribharath/trail@latest</code>
+        <div class="cmd" data-copy="brew install veluribharath/tap/trail">
+          <code><span class="prompt">$</span> brew install veluribharath/tap/trail</code>
           <button class="copy" type="button" aria-label="Copy install command">Copy</button>
         </div>
       </div>
@@ -162,6 +162,13 @@
       <h2 id="install-h" class="section-title">Up and running in a minute.</h2>
       <div class="grid three">
         <div class="card">
+          <h3>With Homebrew</h3>
+          <p>On macOS. Updates come with <code>brew upgrade</code>, and there's no quarantine step.</p>
+          <pre data-copy="brew install veluribharath/tap/trail
+trail -open"><code>brew install veluribharath/tap/trail
+trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</button></pre>
+        </div>
+        <div class="card">
           <h3>Download a release</h3>
           <p>Builds for macOS (Apple Silicon and Intel) and Linux (x86_64 and ARM64) on the <a href="https://github.com/veluribharath/trail/releases/latest">Releases page</a>.</p>
           <pre data-copy="tar -xzf trail_*_darwin_arm64.tar.gz
@@ -172,17 +179,10 @@ xattr -d com.apple.quarantine ./trail  <span class="c"># macOS</span>
         </div>
         <div class="card">
           <h3>With Go 1.24+</h3>
-          <p>Installs the latest tagged version into your Go bin directory.</p>
+          <p>Installs the latest tagged version into your Go bin directory. To build from a clone instead, run <code>make build</code>.</p>
           <pre data-copy="go install github.com/veluribharath/trail@latest
 trail -open"><code>go install github.com/veluribharath/trail@latest
 trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</button></pre>
-        </div>
-        <div class="card">
-          <h3>From source</h3>
-          <p>No build step for the UI; it's embedded at compile time.</p>
-          <pre data-copy="git clone https://github.com/veluribharath/trail && cd trail
-make build && ./trail -open"><code>git clone https://github.com/veluribharath/trail &amp;&amp; cd trail
-make build &amp;&amp; ./trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</button></pre>
         </div>
       </div>
 
