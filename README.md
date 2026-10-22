@@ -8,7 +8,7 @@ trail finds the sessions that Claude Code, Codex and OpenCode leave on your mach
 
 Each session opens with a trace: one tick per step, prompts tall, edits amber, failures red. Drag across it to move through the transcript. Press ⌘K (Ctrl+K) to search: it matches session names, and everything said and run inside every transcript. Pick a match to open the session at that step, with every other matching step marked on the trace; `n` and `Shift+N` step through them. `/` filters the sidebar by name, and `j`/`k` step between sessions.
 
-It’s a single static Go binary with an embedded browser UI (fonts included, nothing loads from the network). It only reads agent storage, never writes to it.
+It’s a single static Go binary with an embedded browser UI (fonts included, nothing loads from the network). It only reads agent storage, never writes to it, and makes no network calls unless you turn on [related sessions](#related-sessions-opt-in), which talk to an embedding model on your machine.
 
 ## Install
 
@@ -58,6 +58,9 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | `-claude-dir` | `$CLAUDE_CONFIG_DIR` or `~/.claude` |
 | `-codex-dir` | `$CODEX_HOME` or `~/.codex` |
 | `-opencode-dir` | `$XDG_DATA_HOME/opencode` or `~/.local/share/opencode` |
+| `-semantic` | off; see [Related sessions](#related-sessions-opt-in) |
+| `-embed-url` | `http://127.0.0.1:11434` (Ollama) |
+| `-embed-model` | `nomic-embed-text` |
 
 ## What it reads
 
@@ -85,7 +88,30 @@ Search covers prompts, replies, tool calls (commands, patterns, paths, edit cont
 | `file:cart.go` | only steps that edited a matching file |
 | `agent:codex` | only one agent's sessions |
 
+Add `mode:words` to a query to turn off related sessions (below) for it.
+
 The index lives in memory and is built in the background when trail starts, re-reading only sessions that changed. Nothing is written to disk. On a generated 450 MB set of transcripts it took about 5 seconds to build, used about 160 MB, and answered in about 100 ms.
+
+### Related sessions (opt-in)
+
+With `-semantic`, search also finds turns that mean the same thing without sharing words, so "where did we speed up page loads" finds a session about caching. Matches found this way are labelled Related and ranked together with word matches.
+
+It needs an embedding model running on your machine. With [Ollama](https://ollama.com):
+
+```
+ollama pull nomic-embed-text
+./trail -semantic
+```
+
+Any server with an OpenAI-compatible embeddings API works too (llama.cpp, LM Studio, vLLM): `./trail -semantic -embed-url http://127.0.0.1:8080/v1 -embed-model <name>`.
+
+What changes when you turn it on:
+
+- trail sends each turn's text (prompt, replies, one-line tool summaries) to the embedding server, `http://127.0.0.1:11434` unless you say otherwise. If you point `-embed-url` at another machine, transcript text goes there; trail warns you at startup.
+- trail writes the vectors to its own cache (`~/Library/Caches/trail/vectors` on macOS, `~/.cache/trail/vectors` on Linux), readable only by you, so a restart only embeds new or changed sessions. It never writes to agent storage. `./trail -forget` deletes the cache.
+- The first run embeds every session, newest first, and can take a while on a large history; search works from the start and picks up related sessions as they are ready.
+
+Queries that use `in:`, `tool:` or `file:` stay word searches, since the vectors don't know about fields, tools or files.
 
 ## How diffs and commits are matched
 
@@ -104,6 +130,7 @@ opencode.go  OpenCode adapter
 sqlite.go    read-only SQLite reader (tables, indexes, WAL)
 index.go     discovery, mtime cache, repo-root grouping
 search.go    full-text index and queries
+semantic.go  opt-in related-session search over a local embedding model
 git.go       commits in the session window
 server.go    JSON API and embedded UI
 live.go      live updates for a session that is still being written
@@ -116,7 +143,6 @@ Adding an agent means implementing `Provider` (four methods) and registering it 
 
 - Gemini CLI, Kiro, pi
 - Renaming sessions from trail (names are read from the agents, never written)
-- Semantic search (finding a session by meaning rather than words), as an opt-in that uses a local model
 
 ## Contributing
 

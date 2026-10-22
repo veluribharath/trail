@@ -387,14 +387,19 @@ type Query struct {
 	tool    string
 	file    string
 	agent   string
+
+	text      string // the words and phrases as typed, without filters
+	narrowed  bool   // in:, tool: or file: was given; meaning search can't honor them
+	wordsOnly bool   // mode:words turns meaning search off for this query
 }
 
 // ParseQuery reads plain words, "quoted phrases" and the filters in:, tool:,
-// file: and agent:. The last word is matched as a prefix while the person is
+// file:, agent: and mode:words. The last word is matched as a prefix while the person is
 // still typing it (no trailing space).
 func ParseQuery(raw string) Query {
 	q := Query{}
 	var prefix string
+	var text []string
 	parts := splitQuery(raw)
 	for i, p := range parts {
 		if p.quoted {
@@ -402,6 +407,7 @@ func ParseQuery(raw string) Query {
 			if ph == "" {
 				continue
 			}
+			text = append(text, p.text)
 			q.phrases = append(q.phrases, ph)
 			tokenize(ph, false, func(t string) { q.slots = append(q.slots, []string{t}) })
 			q.words = append(q.words, ph)
@@ -413,18 +419,25 @@ func ParseQuery(raw string) Query {
 				for _, f := range strings.Split(strings.ToLower(v), ",") {
 					q.fields |= fieldNamed(f)
 				}
+				q.narrowed = true
 				continue
 			case "tool":
 				q.tool = strings.ToLower(v)
+				q.narrowed = true
 				continue
 			case "file":
 				q.file = strings.ToLower(v)
+				q.narrowed = true
 				continue
 			case "agent":
 				q.agent = strings.ToLower(v)
 				continue
+			case "mode":
+				q.wordsOnly = strings.EqualFold(v, "words")
+				continue
 			}
 		}
+		text = append(text, p.text)
 		var toks []string
 		tokenize(p.text, false, func(t string) { toks = append(toks, t) })
 		last := i == len(parts)-1 && !strings.HasSuffix(raw, " ") && !p.quoted
@@ -440,6 +453,7 @@ func ParseQuery(raw string) Query {
 	if prefix != "" {
 		q.slots = append(q.slots, []string{prefix, "\x00prefix"})
 	}
+	q.text = strings.Join(text, " ")
 	if q.fields == 0 {
 		q.fields = fDefault
 	}
@@ -503,6 +517,8 @@ type SearchResult struct {
 	Indexed  int           `json:"indexed"`  // session files searched
 	Total    int           `json:"total"`    // session files known
 	Building bool          `json:"building"` // still reading transcripts
+
+	Semantic *SemanticStatus `json:"semantic,omitempty"` // set when trail runs with -semantic
 }
 
 type SessionHits struct {
@@ -815,9 +831,14 @@ type cachedTranscript struct {
 // transcript returns the parsed session a candidate was indexed from, or nil
 // when the file has changed since (the next sync will catch up).
 func (s *Search) transcript(c candidate) *Transcript {
+	return s.transcriptAt(c.path, c.key, c.ss.stamp)
+}
+
+// transcriptAt parses a session through the cache, as of the given stamp.
+func (s *Search) transcriptAt(path, key, stamp string) *Transcript {
 	s.cacheMu.Lock()
 	for i, ct := range s.cache {
-		if ct.path == c.path && ct.stamp == c.ss.stamp {
+		if ct.path == path && ct.stamp == stamp {
 			s.cache = append(append(s.cache[:i:i], s.cache[i+1:]...), ct)
 			s.cacheMu.Unlock()
 			return ct.t
@@ -825,14 +846,14 @@ func (s *Search) transcript(c candidate) *Transcript {
 	}
 	s.cacheMu.Unlock()
 
-	provider, _, _ := strings.Cut(c.key, ":")
-	t, err := s.idx.parseFull(provider, c.path)
+	provider, _, _ := strings.Cut(key, ":")
+	t, err := s.idx.parseFull(provider, path)
 	if t == nil || (err != nil && len(t.Events) == 0) {
 		return nil
 	}
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
-	s.cache = append(s.cache, &cachedTranscript{c.path, c.ss.stamp, t})
+	s.cache = append(s.cache, &cachedTranscript{path, stamp, t})
 	if len(s.cache) > cacheSize {
 		s.cache = s.cache[1:]
 	}

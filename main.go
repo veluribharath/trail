@@ -4,6 +4,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"net"
@@ -41,11 +42,29 @@ func main() {
 	open := flag.Bool("open", false, "open the browser after starting")
 	list := flag.Bool("list", false, "print sessions grouped by folder and exit")
 	search := flag.String("search", "", "print sessions whose transcripts match a query and exit")
+	semantic := flag.Bool("semantic", false, "also find steps by meaning, using a local embedding model (see -embed-url)")
+	embedURL := flag.String("embed-url", "http://127.0.0.1:11434", "embedding server for -semantic: Ollama, or an OpenAI-compatible URL ending in /v1")
+	embedModel := flag.String("embed-model", "nomic-embed-text", "embedding model for -semantic")
+	forget := flag.Bool("forget", false, "delete the vectors -semantic cached and exit")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
 	if *showVersion {
 		fmt.Println("trail", currentVersion())
+		return
+	}
+
+	if *forget {
+		dir := cacheDir()
+		if dir == "" {
+			fmt.Fprintln(os.Stderr, "trail: no cache directory on this system")
+			os.Exit(1)
+		}
+		if err := os.RemoveAll(dir); err != nil {
+			fmt.Fprintln(os.Stderr, "trail:", err)
+			os.Exit(1)
+		}
+		fmt.Println("deleted", dir)
 		return
 	}
 
@@ -58,12 +77,25 @@ func main() {
 		return
 	}
 	srch := NewSearch(idx)
+	var sem *Semantic
+	if *semantic {
+		sem = NewSemantic(idx, srch, newHTTPEmbedder(*embedURL, *embedModel), *embedModel, cacheDir())
+	}
 	if *search != "" {
 		srch.Sync()
-		printSearch(idx, srch, *search)
+		if sem != nil {
+			if err := sem.Sync(context.Background()); err != nil {
+				fmt.Fprintln(os.Stderr, "trail: meaning search is off for this run:", err)
+				sem = nil
+			}
+		}
+		printSearch(idx, srch, sem, *search)
 		return
 	}
 	srch.Kick()
+	if sem != nil {
+		sem.Kick()
+	}
 
 	ln, err := net.Listen("tcp", net.JoinHostPort(*host, strconv.Itoa(*port)))
 	if err != nil {
@@ -84,6 +116,12 @@ func main() {
 		fmt.Printf("  %-8s %-40s %s\n", s.Name, s.Root, state)
 	}
 	fmt.Printf("  indexed in %s\n  open %s\n", time.Since(start).Round(time.Millisecond), url)
+	if sem != nil {
+		fmt.Printf("  semantic %s at %s, vectors cached in %s\n", *embedModel, *embedURL, cacheDir())
+		if !isLoopback(*embedURL) {
+			fmt.Println("  warning: -embed-url is not on this machine, so transcript text will be sent to it")
+		}
+	}
 	if *host != "127.0.0.1" && *host != "localhost" {
 		fmt.Println("  warning: transcripts can contain secrets, and anyone who can reach this port can read them")
 	}
@@ -91,7 +129,7 @@ func main() {
 		openBrowser(url)
 	}
 
-	srv := &Server{index: idx, search: srch, home: homeDir(), version: currentVersion()}
+	srv := &Server{index: idx, search: srch, semantic: sem, home: homeDir(), version: currentVersion()}
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := httpSrv.Serve(ln); err != nil {
 		fmt.Fprintln(os.Stderr, "trail:", err)
@@ -117,8 +155,15 @@ func printList(idx *Index) {
 	}
 }
 
-func printSearch(idx *Index, srch *Search, q string) {
-	res := srch.Run(ParseQuery(q+" "), "", 50)
+func printSearch(idx *Index, srch *Search, sem *Semantic, q string) {
+	pq := ParseQuery(q + " ")
+	res := srch.Run(pq, "", 50)
+	if sem != nil {
+		res = sem.Blend(context.Background(), pq, res, "", 50)
+		if res.Semantic.Error != "" {
+			fmt.Fprintln(os.Stderr, "trail: meaning search failed:", res.Semantic.Error)
+		}
+	}
 	if len(res.Sessions) == 0 {
 		fmt.Println("no matches")
 		return

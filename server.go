@@ -15,10 +15,11 @@ import (
 var webFS embed.FS
 
 type Server struct {
-	index   *Index
-	search  *Search
-	home    string
-	version string
+	index    *Index
+	search   *Search
+	semantic *Semantic // nil unless trail runs with -semantic
+	home     string
+	version  string
 }
 
 func (s *Server) Handler() http.Handler {
@@ -41,6 +42,9 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	status := s.index.Scan(maxAge)
 	s.search.Kick()
+	if s.semantic != nil {
+		s.semantic.Kick()
+	}
 	writeJSON(w, map[string]any{
 		"home":      s.home,
 		"version":   s.version,
@@ -67,7 +71,13 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	if limit <= 0 || limit > 200 {
 		limit = 30
 	}
-	writeJSON(w, s.search.Run(ParseQuery(r.URL.Query().Get("q")), r.URL.Query().Get("id"), limit))
+	q, only := ParseQuery(r.URL.Query().Get("q")), r.URL.Query().Get("id")
+	res := s.search.Run(q, only, limit)
+	if s.semantic != nil {
+		s.semantic.Kick()
+		res = s.semantic.Blend(r.Context(), q, res, only, limit)
+	}
+	writeJSON(w, res)
 }
 
 func (s *Server) handleCommits(w http.ResponseWriter, r *http.Request) {
