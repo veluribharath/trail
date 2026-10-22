@@ -43,6 +43,7 @@ type searchSession struct {
 	docs  []docMeta
 	post  []uint64           // term id<<32 | doc<<8 | tf, sorted
 	edits map[int32][]string // event -> files it edited
+	stats *sessionStats      // for the stats view
 }
 
 // docMeta is one searchable field of one event.
@@ -184,7 +185,7 @@ func (s *Search) build(f indexedFile) {
 	var ss *searchSession
 	t, err := s.idx.parseFull(f.provider, f.path)
 	if t != nil && (err == nil || len(t.Events) > 0) {
-		ss = &searchSession{stamp: f.stamp, key: f.key, edits: map[int32][]string{}}
+		ss = &searchSession{stamp: f.stamp, key: f.key, edits: map[int32][]string{}, stats: collectStats(t)}
 	}
 	type pair struct {
 		term string
