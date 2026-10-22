@@ -20,12 +20,16 @@ type Server struct {
 	index    *Index
 	search   *Search
 	semantic *Semantic // nil unless trail runs with -semantic
+	retro    *RetroCache
 	notes    *NoteStore
 	home     string
 	version  string
 }
 
 func (s *Server) Handler() http.Handler {
+	if s.retro == nil {
+		s.retro = NewRetroCache(s.index)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/sessions", s.handleSessions)
 	mux.HandleFunc("GET /api/session", s.handleSession)
@@ -34,6 +38,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/live", s.handleLive)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/export", s.handleExport)
+	mux.HandleFunc("GET /api/retro", s.handleRetro)
 	mux.HandleFunc("PUT /api/notes", s.handleSetNotes)
 	mux.HandleFunc("GET /api/blame", s.handleBlame)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
@@ -144,6 +149,18 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="`+exportName(t.Session)+`"`)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(b.Bytes())
+}
+
+// handleRetro suggests instruction-file rules for one project. root must be
+// a folder sessions are filed under, so it never reads an arbitrary path.
+func (s *Server) handleRetro(w http.ResponseWriter, r *http.Request) {
+	s.index.Scan(5 * time.Second)
+	res, ok := s.retro.Build(r.URL.Query().Get("root"))
+	if !ok {
+		fail(w, http.StatusNotFound, "No sessions are filed under that folder. Refresh the list.")
+		return
+	}
+	writeJSON(w, res)
 }
 
 // handlePing lets trail -mcp check that a window it found is trail, reading

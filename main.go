@@ -57,6 +57,7 @@ func main() {
 	stats := flag.String("stats", "", "print activity for the last N days (or all) and exit")
 	export := flag.String("export", "", "write one session (id, provider:id, or id prefix) as a single offline HTML file and exit")
 	out := flag.String("o", "", "file for -export to write; without it the page goes to standard output")
+	retro := flag.String("retro", "", "print suggested CLAUDE.md or AGENTS.md rules from a project's sessions (a folder, or . for this one) and exit")
 	noNotes := flag.Bool("no-notes", false, "leave your notes and bookmarks out of -export")
 	redact := flag.Bool("redact", false, "hide keys, tokens and passwords in the -export file")
 	mcp := flag.Bool("mcp", false, "serve the Model Context Protocol on standard input and output, so an agent can search past sessions")
@@ -150,6 +151,16 @@ func main() {
 		}
 		return
 	}
+	if *retro != "" {
+		root, err := retroRoot(idx, *retro)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "trail:", err)
+			os.Exit(1)
+		}
+		r, _ := NewRetroCache(idx).Build(root)
+		printRetro(os.Stdout, r, homeDir())
+		return
+	}
 	srch := NewSearch(idx)
 	var sem *Semantic
 	if *semantic {
@@ -230,7 +241,7 @@ func main() {
 		os.Exit(0)
 	}()
 
-	srv := &Server{index: idx, search: srch, semantic: sem, notes: notes, home: homeDir(), version: currentVersion()}
+	srv := &Server{index: idx, search: srch, semantic: sem, notes: notes, retro: NewRetroCache(idx), home: homeDir(), version: currentVersion()}
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := httpSrv.Serve(ln); err != nil {
 		fmt.Fprintln(os.Stderr, "trail:", err)
