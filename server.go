@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -15,6 +16,7 @@ var webFS embed.FS
 
 type Server struct {
 	index   *Index
+	search  *Search
 	home    string
 	version string
 }
@@ -25,6 +27,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/session", s.handleSession)
 	mux.HandleFunc("GET /api/commits", s.handleCommits)
 	mux.HandleFunc("GET /api/commit", s.handleCommit)
+	mux.HandleFunc("GET /api/search", s.handleSearch)
 	sub, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", noCache(http.FileServer(http.FS(sub))))
 	return securityHeaders(mux)
@@ -36,6 +39,7 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 		maxAge = 0
 	}
 	status := s.index.Scan(maxAge)
+	s.search.Kick()
 	writeJSON(w, map[string]any{
 		"home":      s.home,
 		"version":   s.version,
@@ -51,6 +55,18 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, t)
+}
+
+// handleSearch answers from whatever is indexed so far; while transcripts are
+// still being read the result says so, and the page asks again.
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	s.index.Scan(5 * time.Second)
+	s.search.Kick()
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	if limit <= 0 || limit > 200 {
+		limit = 30
+	}
+	writeJSON(w, s.search.Run(ParseQuery(r.URL.Query().Get("q")), r.URL.Query().Get("id"), limit))
 }
 
 func (s *Server) handleCommits(w http.ResponseWriter, r *http.Request) {

@@ -261,3 +261,31 @@ func (x *Index) repoRoot(cwd string) (root, worktree string) {
 	x.rootsMu.Unlock()
 	return root, worktree
 }
+
+// indexedFile is a session file the index holds, for the search index to
+// follow without re-statting anything.
+type indexedFile struct {
+	path, key, provider string
+	size                int64
+	mod                 time.Time
+}
+
+func (x *Index) files() []indexedFile {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	out := make([]indexedFile, 0, len(x.entries))
+	for path, e := range x.entries {
+		out = append(out, indexedFile{path: path, key: e.sess.Key, provider: e.sess.Provider, size: e.size, mod: e.mod})
+	}
+	return out
+}
+
+// parseFull reads a whole transcript by provider name.
+func (x *Index) parseFull(provider, path string) (*Transcript, error) {
+	for _, p := range x.providers {
+		if p.Name() == provider {
+			return p.Parse(path, true)
+		}
+	}
+	return nil, os.ErrNotExist
+}
