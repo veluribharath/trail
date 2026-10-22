@@ -4,11 +4,13 @@ See what your coding agents did, folder by folder.
 
 ![trail showing a Claude Code session: the trace strip under the header, the transcript as a trail of steps on the left, and the diffs it made on the right](docs/screenshot.png)
 
-trail finds the sessions that Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first. Any session can be [exported](#export-a-session) as one HTML file to share, and [Stats](#stats) show how your agents work across every project. [Lessons](#lessons) suggests rules for CLAUDE.md or AGENTS.md from what you keep correcting.
+trail finds the sessions that Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first. Any session can be [exported](#export-a-session) as one HTML file to share, and [Stats](#stats) show how your agents work across every project. And `trail blame file:line` [tells you which session wrote a line](#who-wrote-this-line), and which step and prompt. [Lessons](#lessons) suggests rules for CLAUDE.md or AGENTS.md from what you keep correcting.
 
-Each session opens with a trace: one tick per step, prompts tall, edits amber, failures red. Drag across it to move through the transcript. Press ⌘K (Ctrl+K) to search: it matches session names, and everything said and run inside every transcript. Pick a match to open the session at that step, with every other matching step marked on the trace; `n` and `Shift+N` step through them. `/` filters the sidebar by name, and `j`/`k` step between sessions.
+Each session opens with a trace: one tick per step, prompts tall, edits amber, failures red. Drag across it to move through the transcript. Press ⌘K (Ctrl+K) to search: it matches session names, and everything said and run inside every transcript. Pick a match to open the session at that step, with every other matching step marked on the trace; `n` and `Shift+N` step through them. `/` filters the sidebar by name, and `j`/`k` step between sessions. [Bookmark](#notes-and-bookmarks) a session or a single step, and leave yourself a note on either.
 
-It’s a single static Go binary with an embedded browser UI (fonts included, nothing loads from the network). It only reads agent storage, never writes to it, writes an export only where you save it, and makes no network calls unless you turn on [related sessions](#related-sessions-opt-in), which talk to an embedding model on your machine.
+![A session in trail with a note under its header and two bookmarked steps, one with its own note](docs/notes.png)
+
+It’s a single static Go binary with an embedded browser UI (fonts included, nothing loads from the network). It only reads agent storage, never writes to it, keeps your notes in a file of its own, writes an export only where you save it, and makes no network calls unless you turn on [related sessions](#related-sessions-opt-in), which talk to an embedding model on your machine.
 
 ## Install
 
@@ -47,10 +49,13 @@ make build
 ./trail -open      # and open the browser
 ./trail -list      # print sessions by folder and exit
 ./trail -search "flaky login"   # print matching sessions and steps, and exit
+./trail blame cart.go:42        # the session and step that wrote a line, and exit
 ./trail -prices    # print the token prices used for costs, and exit
 ./trail -export c1 -o session.html   # write one session as an offline page, and exit
 ./trail -retro .   # print rules worth adding to CLAUDE.md or AGENTS.md for this project, and exit
+./trail -notes     # print your bookmarks and notes, and exit
 ./trail -stats 30   # print the last 30 days in numbers (or -stats all), and exit
+./trail -mcp       # an MCP server on stdio, so your agent can search past sessions
 ```
 
 On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop. Transcripts often contain secrets, so only do this on a network you trust (or tunnel the port over SSH instead).
@@ -69,9 +74,12 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | `-embed-url` | `http://127.0.0.1:11434` (Ollama) |
 | `-embed-model` | `nomic-embed-text` |
 | `-prices` | print the price table and exit |
-| `-export`, `-o` | off; see [Export a session](#export-a-session) |
-| `-retro` | off; a project folder, or `.`; see [Lessons](#lessons) |
+| `-export`, `-o`, `-redact` | off; see [Export a session](#export-a-session) |
+| `-no-notes` | off: `-export` includes your notes and bookmarks |
+| `-notes` | print your bookmarks and notes and exit; see [Notes and bookmarks](#notes-and-bookmarks) |
 | `-stats` | off; a number of days, or `all`; see [Stats](#stats) |
+| `-retro` | off; a project folder, or `.`; see [Lessons](#lessons) |
+| `-mcp` | off; see [Let your agent search past sessions](#let-your-agent-search-past-sessions-mcp) |
 
 ## What it reads
 
@@ -121,7 +129,7 @@ Any server with an OpenAI-compatible embeddings API works too (llama.cpp, LM Stu
 What changes when you turn it on:
 
 - trail sends each turn's text (prompt, replies, one-line tool summaries) to the embedding server, `http://127.0.0.1:11434` unless you say otherwise. If you point `-embed-url` at another machine, transcript text goes there; trail warns you at startup.
-- trail writes the vectors to its own cache (`~/Library/Caches/trail/vectors` on macOS, `~/.cache/trail/vectors` on Linux), readable only by you, so a restart only embeds new or changed sessions. It never writes to agent storage. `./trail -forget` deletes the cache.
+- trail writes the vectors to its own cache (`~/Library/Caches/trail/vectors` on macOS, `~/.cache/trail/vectors` on Linux), readable only by you, so a restart only embeds new or changed sessions. It never writes to agent storage. `./trail -forget` deletes the cache. Your notes and bookmarks aren't in it, so they stay.
 - The first run embeds every session, newest first, and can take a while on a large history; search works from the start and picks up related sessions as they are ready.
 
 Queries that use `in:`, `tool:` or `file:` stay word searches, since the vectors don't know about fields, tools or files.
@@ -144,6 +152,40 @@ Prices ship inside trail (`prices.json`, dated) and trail never fetches them. `.
 
 Rates are USD per million tokens. A model with no price shows its tokens with the cost as "—", and a total that includes one reads "≥". OpenCode records its own cost for each step, which trail uses for models it has no price for.
 
+## Who wrote this line?
+
+`trail blame` follows lines of a file through git back to the agent session and step that wrote them. It uses only the logs already on your disk, so there are no hooks to install first and sessions from before you installed trail count too.
+
+```
+./trail blame cart.go:16        # one line: commit, session, step, the prompt behind it, resume command
+./trail blame cart.go:10-30     # a range, as runs of lines per session step
+./trail blame cart.go           # the whole file
+```
+
+```
+cart.go:16
+    if pct <= 0 {
+
+commit   5b479a2  Tony, 2026-10-21 15:40  Discounts for promo codes
+session  Claude Code: Add percentage discounts
+id       claude:7f3e0b9c-…
+step     #3 of 3, Edit cart.go, 2026-10-21 15:00
+asked    Add a Discount helper for promo codes
+resume   cd ~/code/shop && claude --resume 7f3e0b9c-…
+```
+
+In the app, every edit in a session's Changes tab has a "Who wrote this" button, and the home page takes any file path (`~/code/shop/cart.go:16`). The view shows the file as it is now, with each run of lines under the session step that wrote it, or the commit when no session did. Click a run to open the session at that step.
+
+How a line is matched:
+
+- `git blame` gives the commit that last brought the line in. trail then looks for edits that introduced exactly that text, recorded by any session that edited the file (under any name it had, so renames are followed) before that commit was made. The latest such edit wins. Commits don't need to map one to one onto sessions: work from several sessions squashed into one commit, or committed hours later, still finds the right step.
+- Lines that aren't committed yet can match any edit. Files outside git work the same way, with every line uncommitted.
+- Short lines such as `}` only match when a neighbouring line from the same commit came from the same edit, and a blank line between two lines from one step belongs to that step.
+- Agents also write files from the shell (a heredoc, `sed -i`, a script). When no edit matches, a shell command that names the file and contains the line is shown as a weaker "probably" match.
+- A line no session's log contains is shown as not from a session. A person wrote it, or the session's log is gone.
+
+The browser view only reads files inside folders your sessions ran in.
+
 ## Export a session
 
 Export saves one session as a single HTML file: the transcript, the trace, every diff, and the commits that touch files the session edited, with their patches. It opens from disk in any browser, with no trail running, and looks like trail without the sidebar. Press `/` to find text in it, and `n` and `Shift+N` to step through the matches.
@@ -157,7 +199,41 @@ In the browser, open a session and choose Export, then Download HTML; your brows
 
 `trail -list` prints session ids. trail writes the file you name and nothing else; it's created readable only by you.
 
-Transcripts can contain secrets: API keys, tokens, environment variables, file contents and command output. Read the file before you share it. The file itself can't make any network request: its content security policy blocks everything but its own inlined script, styles and fonts, so opening it never loads or sends anything. Commits made in the session's window that don't touch its files are left out.
+Transcripts can contain secrets: API keys, tokens, environment variables, file contents and command output. Add `-redact` to replace the ones trail recognises with `[redacted]` in the transcript, commit messages and patches (cloud provider keys, GitHub, GitLab, Slack, Stripe and model-provider tokens, JWTs, private keys, passwords in URLs, and values assigned to names like `password`, `secret` or `api_key`). It's pattern matching, so read the file before you share it either way. The file itself can't make any network request: its content security policy blocks everything but its own inlined script, styles and fonts, so opening it never loads or sends anything. Commits made in the session's window that don't touch its files are left out.
+
+## Let your agent search past sessions (MCP)
+
+`trail -mcp` is a [Model Context Protocol](https://modelcontextprotocol.io) server on standard input and output. Register it once and your agent can look through every past session on this machine: how a bug was fixed before, why a file changed, what was tried and failed.
+
+```
+claude mcp add trail -- trail -mcp          # Claude Code
+codex mcp add trail -- trail -mcp           # Codex
+gemini mcp add trail trail -mcp             # Gemini CLI
+```
+
+Other clients take the same command in their MCP config: `{"command": "trail", "args": ["-mcp"]}`. Add the same `-claude-dir`-style flags you run trail with if your agent folders aren't in the default places, and `-semantic` to blend in meaning search.
+
+It offers three read-only tools:
+
+| Tool | What it does |
+| --- | --- |
+| `search_sessions` | Full-text search with the same syntax as the UI (`"phrases"`, `in:`, `tool:`, `file:`, `agent:`), optionally limited to a project (`"."` is the folder the agent runs in). Returns sessions with their best matching steps. |
+| `list_sessions` | Recent sessions, optionally for one project or agent. |
+| `get_session` | One session's transcript, a page of steps at a time, with long text shortened unless asked. |
+
+Nothing runs in the background. The agent starts `trail -mcp` with each session, and trail reads nothing until the first tool call. Then, if a trail window is open on this machine over the same agent folders, trail asks it, so nothing is rebuilt; otherwise it builds its own index, which takes a few seconds on a large history. A window writes its address to `ui.json` in trail's cache directory while it runs, and only a window on 127.0.0.1 is used.
+
+Whatever the agent reads goes to its model provider, so every result is redacted the same way as `-export -redact`. Redaction is pattern matching: it catches the usual shapes of keys and tokens, not every secret a transcript can hold.
+
+## Notes and bookmarks
+
+Choose Bookmark at the top of a session (or press `b`) to mark it, and Add a note to write about it. Hover any step and click its star to bookmark that step; a box opens under it for a note. Notes save as you type.
+
+Bookmarked steps are marked in amber on the trace. In the sidebar, the Bookmarks chip shows only the sessions you marked or wrote on, and the filter box matches the text of your notes. ⌘K lists your bookmarks before your recent sessions, and typing searches them too; pick a bookmarked step to open the session at it. `./trail -notes` prints them all.
+
+Notes belong to trail, not to the agents. They're kept in one file, `~/Library/Application Support/trail/notes.json` on macOS and `~/.config/trail/notes.json` on Linux (`$XDG_CONFIG_HOME/trail`), readable only by you. Nothing is written to agent storage, so notes work the same for every agent, keyed by each session's id. `-forget` leaves them alone; delete the file to remove them all. A step is remembered by its position in the session, along with a line of what it was when you marked it.
+
+An export includes the session's notes and bookmarks, read-only. Untick Include my notes and bookmarks in the export dialog, or pass `-no-notes` to `-export`, to leave them out. `-redact` applies to them as well.
 
 ## Lessons
 
@@ -206,8 +282,12 @@ search.go    full-text index and queries
 stats.go     sessions, files and failures over time
 semantic.go  opt-in related-session search over a local embedding model
 git.go       commits in the session window
+blame.go     trail blame: lines of a file back to the session steps that wrote them
 server.go    JSON API and embedded UI
 export.go    one session as a self-contained HTML file
+notes.go     your notes and bookmarks, in trail's own file
+redact.go    secret redaction for exports and MCP results
+mcp.go       trail -mcp: the MCP server and its tools
 retro.go     lessons: repeated corrections and failing commands as suggested rules
 live.go      live updates for a session that is still being written
 usage.go     token counts per response and session

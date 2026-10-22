@@ -134,8 +134,8 @@ func TestSessionFailures(t *testing.T) {
 	}
 }
 
-// claudeSession writes a Claude Code session file for the retro tests.
-func claudeSession(t *testing.T, dir, id, cwd string, start time.Time, steps ...any) {
+// retroSession writes a Claude Code session file for the retro tests.
+func retroSession(t *testing.T, dir, id, cwd string, start time.Time, steps ...any) {
 	t.Helper()
 	var b bytes.Buffer
 	ts := start
@@ -171,15 +171,15 @@ func TestRetroProject(t *testing.T) {
 	fail := func(cmd, out string) [3]string { return [3]string{cmd, out, "err"} }
 	ok := func(cmd string) [3]string { return [3]string{cmd, "ok", ""} }
 
-	claudeSession(t, dir, "r1", proj, day,
+	retroSession(t, dir, "r1", proj, day,
 		"Add a coupon field", ok("ls"), "no, use pnpm",
 		fail("npm install", "npm ERR! Unsupported URL Type \"workspace:\""), ok("pnpm install"),
 		fail("rg coupon", "bash: rg: command not found"))
-	claudeSession(t, dir, "r2", proj, day.AddDate(0, 0, 1),
+	retroSession(t, dir, "r2", proj, day.AddDate(0, 0, 1),
 		"Fix the cart rounding", ok("ls"), "No, we use pnpm here", "please always keep commits small",
 		fail("npm install", "npm ERR! Unsupported URL Type \"workspace:\""), ok("pnpm install"),
 		fail("rg total", "bash: rg: command not found"))
-	claudeSession(t, dir, "r3", proj, day.AddDate(0, 0, 2),
+	retroSession(t, dir, "r3", proj, day.AddDate(0, 0, 2),
 		"Rename the cart service. Always keep commits small.", fail("rg cart", "bash: rg: command not found"),
 		fail("make lint", "make: *** No rule to make target 'lint'.  Stop."), fail("make lint", "make: *** No rule to make target 'lint'.  Stop."),
 		fail("make lint", "make: *** No rule to make target 'lint'.  Stop."))

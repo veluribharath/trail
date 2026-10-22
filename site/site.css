@@ -153,6 +153,12 @@ h2 { font-size: clamp(28px, 3.6vw, 40px); }
 
 /* trace demo */
 .trace-demo { background: var(--surface); }
+.blame-demo .kicker { color: var(--blaze); font-size: 13px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; margin-bottom: 10px; }
+.blame-box { padding: 0; overflow: hidden; }
+.blame-box pre { margin: 0; padding: 20px 22px; background: none; border: 0; border-radius: 0; box-shadow: none; overflow-x: auto; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+.blame-box pre code { font-size: inherit; }
+.blame-box .c, .blame-box .k { color: var(--faint); }
+.blame-box .dot { width: 8px; height: 8px; margin-right: 7px; vertical-align: 0; }
 .demo { background: var(--raised); border: 1px solid var(--line); border-radius: var(--r-lg); padding: 22px; box-shadow: var(--shadow); }
 .demo-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 16px; }
 .demo-head .muted { font-size: 14px; }
@@ -191,6 +197,8 @@ h2 { font-size: clamp(28px, 3.6vw, 40px); }
 .card > svg { width: 26px; height: 26px; fill: none; stroke: var(--blaze); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; margin-bottom: 18px; }
 .card h3 { font-size: 19px; margin-bottom: 8px; }
 .card p { color: var(--muted); font-size: 15.5px; }
+.card.wide { grid-column: 1 / -1; }
+.card.wide pre { margin-top: 16px; padding-right: 64px; }
 .keys { margin: 14px 0 0; display: grid; gap: 7px; font-size: 14.5px; }
 .keys div { display: grid; grid-template-columns: 74px 1fr; align-items: center; }
 .keys dt { display: flex; gap: 3px; }

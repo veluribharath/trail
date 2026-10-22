@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ type Server struct {
 	search   *Search
 	semantic *Semantic // nil unless trail runs with -semantic
 	retro    *RetroCache
+	notes    *NoteStore
 	home     string
 	version  string
 }
@@ -37,7 +39,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/export", s.handleExport)
 	mux.HandleFunc("GET /api/retro", s.handleRetro)
+	mux.HandleFunc("PUT /api/notes", s.handleSetNotes)
+	mux.HandleFunc("GET /api/blame", s.handleBlame)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
+	mux.HandleFunc("GET /api/ping", s.handlePing)
 	sub, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", noCache(http.FileServer(http.FS(sub))))
 	return securityHeaders(mux)
@@ -53,12 +58,47 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	if s.semantic != nil {
 		s.semantic.Kick()
 	}
-	writeJSON(w, map[string]any{
+	notes, err := s.notes.All()
+	resp := map[string]any{
 		"home":      s.home,
 		"version":   s.version,
 		"providers": status,
 		"sessions":  s.index.Sessions(),
-	})
+		"notes":     notes,
+	}
+	if err != nil {
+		resp["notesError"] = err.Error()
+	}
+	writeJSON(w, resp)
+}
+
+// handleSetNotes replaces one session's notes and bookmarks. It is the only
+// request that writes anything, and it writes only trail's own notes file.
+// Browsers send a JSON PUT across sites only after a CORS preflight, which
+// this server never answers, and securityHeaders refuses cross-site fetches.
+func (s *Server) handleSetNotes(w http.ResponseWriter, r *http.Request) {
+	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		fail(w, http.StatusUnsupportedMediaType, "send notes as application/json")
+		return
+	}
+	key := r.URL.Query().Get("id")
+	if s.index.Get(key) == nil {
+		fail(w, http.StatusNotFound, "That session is no longer on disk. Refresh the list.")
+		return
+	}
+	var n SessionNotes
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&n); err != nil {
+		fail(w, http.StatusBadRequest, "couldn't read the notes: "+err.Error())
+		return
+	}
+	stored, err := s.notes.Set(key, n)
+	if err != nil {
+		fail(w, http.StatusBadRequest, "couldn't save the notes: "+err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"notes": stored})
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
@@ -96,8 +136,12 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "That session is no longer on disk. Refresh the list.")
 		return
 	}
+	var notes *SessionNotes
+	if r.URL.Query().Get("notes") != "0" {
+		notes = s.notes.Get(t.Session.Key)
+	}
 	var b bytes.Buffer
-	if err := ExportHTML(r.Context(), &b, t, s.home, s.version); err != nil {
+	if err := ExportHTMLNotes(r.Context(), &b, t, s.home, s.version, false, notes); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -117,6 +161,12 @@ func (s *Server) handleRetro(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, res)
+}
+
+// handlePing lets trail -mcp check that a window it found is trail, reading
+// the same agent folders, before it searches through it.
+func (s *Server) handlePing(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"app": "trail", "version": s.version, "sources": s.index.Sources()})
 }
 
 // handleStats aggregates sessions by project, file, tool and agent. Tool and
@@ -165,6 +215,57 @@ func (s *Server) handleCommit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, map[string]string{"patch": patch})
+}
+
+// handleBlame attributes a file's lines to sessions. A relative path is read
+// against the session named by id. Only files under a folder some session
+// ran in can be read, so the page can't be used to read anything else.
+func (s *Server) handleBlame(w http.ResponseWriter, r *http.Request) {
+	p := strings.TrimSpace(r.URL.Query().Get("path"))
+	if p == "~" || strings.HasPrefix(p, "~/") {
+		p = filepath.Join(s.home, p[1:])
+	}
+	if p == "" {
+		fail(w, http.StatusBadRequest, "Name a file.")
+		return
+	}
+	if !filepath.IsAbs(p) {
+		sess := s.index.Get(r.URL.Query().Get("id"))
+		if sess == nil {
+			fail(w, http.StatusBadRequest, "Give the file's full path, or a path inside a session's folder.")
+			return
+		}
+		p = filepath.Join(sess.Cwd, p)
+	}
+	// Resolve the file itself too: a link inside a session folder must not
+	// lead to a file outside every one.
+	if r, err := filepath.EvalSymlinks(p); err == nil {
+		p = r
+	} else {
+		p = realPath(filepath.Clean(p))
+	}
+	if !s.underSession(p) {
+		fail(w, http.StatusForbidden, "trail only reads files inside folders your sessions ran in.")
+		return
+	}
+	writeJSON(w, Blame(r.Context(), s.index, p))
+}
+
+func (s *Server) underSession(p string) bool {
+	for _, sess := range s.index.Sessions() {
+		for _, dir := range []string{sess.Root, sess.Worktree, sess.Cwd} {
+			if dir == "" || !filepath.IsAbs(dir) {
+				continue
+			}
+			if d, err := filepath.EvalSymlinks(dir); err == nil {
+				dir = d
+			}
+			if rel, err := filepath.Rel(dir, p); err == nil && rel != "." && !strings.HasPrefix(rel, "..") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

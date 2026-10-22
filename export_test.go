@@ -41,7 +41,7 @@ func TestExportEveryProvider(t *testing.T) {
 			t.Fatalf("%s: %v", key, err)
 		}
 		var b bytes.Buffer
-		if err := ExportHTML(context.Background(), &b, tr, "/work", "1.2.3"); err != nil {
+		if err := ExportHTML(context.Background(), &b, tr, "/work", "1.2.3", false); err != nil {
 			t.Fatalf("%s: %v", key, err)
 		}
 		page := b.String()
@@ -201,7 +201,7 @@ func TestExportCommits(t *testing.T) {
 	tr := &Transcript{Session: &Session{Key: "claude:x", Cwd: dir, Title: "t", Started: now.Add(-time.Minute), Ended: now}, Events: []Event{}}
 	tr.addChange(FileChange{Path: filepath.Join(dir, "a.go"), Op: "edit"}, -1)
 	var b bytes.Buffer
-	if err := ExportHTML(t.Context(), &b, tr, "", "dev"); err != nil {
+	if err := ExportHTML(t.Context(), &b, tr, "", "dev", false); err != nil {
 		t.Fatal(err)
 	}
 	var data exportData
