@@ -197,6 +197,12 @@ func TestKiroMissing(t *testing.T) {
 	if paths, err := p.Discover(); err != nil || len(paths) != 0 {
 		t.Errorf("a missing Kiro is no sessions and no error: %v %v", paths, err)
 	}
+	data := t.TempDir()
+	os.WriteFile(filepath.Join(data, "data.sqlite3"), nil, 0o600)
+	p = &kiroProvider{dir: filepath.Join(data, "nope"), dataDir: data}
+	if paths, err := p.Discover(); err != nil || len(paths) != 0 {
+		t.Errorf("an empty database is no sessions and no error: %v %v", paths, err)
+	}
 }
 
 func TestKiroIndexRefresh(t *testing.T) {

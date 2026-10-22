@@ -198,7 +198,8 @@ func kiroFileStamp(path string) string {
 // dbRows lists the database's conversations, reading the tables again only
 // when the database or its WAL changed.
 func (p *kiroProvider) dbRows() (map[string]kiroRow, error) {
-	if _, err := os.Stat(p.dbPath()); err != nil {
+	// kiro-cli creates an empty file on first launch.
+	if fi, err := os.Stat(p.dbPath()); err != nil || fi.Size() == 0 {
 		p.mu.Lock()
 		p.rows, p.rowsKey = nil, ""
 		p.mu.Unlock()
