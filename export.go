@@ -27,7 +27,8 @@ type exportData struct {
 	Home       string            `json:"home"`
 	Transcript *Transcript       `json:"transcript"`
 	Commits    CommitsResult     `json:"commits"`
-	Patches    map[string]string `json:"patches"` // sha -> git show output
+	Patches    map[string]string `json:"patches"`         // sha -> git show output
+	Notes      *SessionNotes     `json:"notes,omitempty"` // the person's notes, when they chose to include them
 }
 
 const maxExportCommits = 30
@@ -37,10 +38,16 @@ var fontURL = regexp.MustCompile(`url\("fonts/([a-z0-9.-]+\.woff2)"\)`)
 // ExportHTML writes t as a self-contained HTML page. Commits are included
 // only when they touch a file the session edited, each with its patch, so
 // the file carries what the session did and not the rest of the repository.
-// With redact, credentials are hidden in the transcript, commit messages and
-// patches; t itself is redacted in place.
+// With redact, credentials are hidden in the transcript, commit messages,
+// patches and notes; t itself is redacted in place.
 func ExportHTML(ctx context.Context, w io.Writer, t *Transcript, home, version string, redact bool) error {
-	data := exportData{Version: version, Exported: time.Now().UTC(), Home: home, Transcript: t, Patches: map[string]string{}}
+	return ExportHTMLNotes(ctx, w, t, home, version, redact, nil)
+}
+
+// ExportHTMLNotes is ExportHTML with the person's notes and bookmarks on the
+// page, read-only. nil leaves them out; with redact, notes is redacted in place.
+func ExportHTMLNotes(ctx context.Context, w io.Writer, t *Transcript, home, version string, redact bool, notes *SessionNotes) error {
+	data := exportData{Version: version, Exported: time.Now().UTC(), Home: home, Transcript: t, Patches: map[string]string{}, Notes: notes}
 	data.Commits = SessionCommits(ctx, t)
 	kept := data.Commits.Commits[:0]
 	for _, c := range data.Commits.Commits {
@@ -62,6 +69,13 @@ func ExportHTML(ctx context.Context, w io.Writer, t *Transcript, home, version s
 		}
 		for sha, p := range data.Patches {
 			data.Patches[sha] = Redact(p)
+		}
+		if notes != nil {
+			notes.Note = Redact(notes.Note)
+			for i := range notes.Steps {
+				notes.Steps[i].Label = Redact(notes.Steps[i].Label)
+				notes.Steps[i].Note = Redact(notes.Steps[i].Note)
+			}
 		}
 	}
 	return writeExport(w, &data)

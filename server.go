@@ -20,6 +20,7 @@ type Server struct {
 	index    *Index
 	search   *Search
 	semantic *Semantic // nil unless trail runs with -semantic
+	notes    *NoteStore
 	home     string
 	version  string
 }
@@ -33,6 +34,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/live", s.handleLive)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/export", s.handleExport)
+	mux.HandleFunc("PUT /api/notes", s.handleSetNotes)
 	mux.HandleFunc("GET /api/blame", s.handleBlame)
 	mux.HandleFunc("GET /api/stats", s.handleStats)
 	mux.HandleFunc("GET /api/ping", s.handlePing)
@@ -51,12 +53,47 @@ func (s *Server) handleSessions(w http.ResponseWriter, r *http.Request) {
 	if s.semantic != nil {
 		s.semantic.Kick()
 	}
-	writeJSON(w, map[string]any{
+	notes, err := s.notes.All()
+	resp := map[string]any{
 		"home":      s.home,
 		"version":   s.version,
 		"providers": status,
 		"sessions":  s.index.Sessions(),
-	})
+		"notes":     notes,
+	}
+	if err != nil {
+		resp["notesError"] = err.Error()
+	}
+	writeJSON(w, resp)
+}
+
+// handleSetNotes replaces one session's notes and bookmarks. It is the only
+// request that writes anything, and it writes only trail's own notes file.
+// Browsers send a JSON PUT across sites only after a CORS preflight, which
+// this server never answers, and securityHeaders refuses cross-site fetches.
+func (s *Server) handleSetNotes(w http.ResponseWriter, r *http.Request) {
+	if ct := r.Header.Get("Content-Type"); !strings.HasPrefix(ct, "application/json") {
+		fail(w, http.StatusUnsupportedMediaType, "send notes as application/json")
+		return
+	}
+	key := r.URL.Query().Get("id")
+	if s.index.Get(key) == nil {
+		fail(w, http.StatusNotFound, "That session is no longer on disk. Refresh the list.")
+		return
+	}
+	var n SessionNotes
+	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<20))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&n); err != nil {
+		fail(w, http.StatusBadRequest, "couldn't read the notes: "+err.Error())
+		return
+	}
+	stored, err := s.notes.Set(key, n)
+	if err != nil {
+		fail(w, http.StatusBadRequest, "couldn't save the notes: "+err.Error())
+		return
+	}
+	writeJSON(w, map[string]any{"notes": stored})
 }
 
 func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
@@ -94,8 +131,12 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "That session is no longer on disk. Refresh the list.")
 		return
 	}
+	var notes *SessionNotes
+	if r.URL.Query().Get("notes") != "0" {
+		notes = s.notes.Get(t.Session.Key)
+	}
 	var b bytes.Buffer
-	if err := ExportHTML(r.Context(), &b, t, s.home, s.version, false); err != nil {
+	if err := ExportHTMLNotes(r.Context(), &b, t, s.home, s.version, false, notes); err != nil {
 		fail(w, http.StatusInternalServerError, err.Error())
 		return
 	}

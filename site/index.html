@@ -118,7 +118,7 @@ cart.go:16
         <article class="card">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h7v14H4zM13 5h7v14h-7zM8 9h-.01M17 10l-2 2 2 2"/></svg>
           <h3>Transcript beside its diffs</h3>
-          <p>Click an edit in the transcript to jump to its diff. Click a diff to jump back to the step that made it. Each diff is the exact before and after the agent sent. Filter to just the conversation, or only edits and failures.</p>
+          <p>Click an edit in the transcript to jump to its diff. Click a diff to jump back to the step that made it. Each diff is the exact before and after the agent sent. Filter to just the conversation, or only edits and failures. Bookmark the step that matters and leave yourself a note.</p>
         </article>
         <article class="card">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 8v8M8 6h4a4 4 0 0 1 4 4v0"/></svg>
@@ -143,6 +143,7 @@ cart.go:16
             <div><dt><kbd>⌘</kbd><kbd>K</kbd></dt><dd>Jump to any session</dd></div>
             <div><dt><kbd>/</kbd></dt><dd>Filter the sidebar</dd></div>
             <div><dt><kbd>j</kbd><kbd>k</kbd></dt><dd>Next and previous session</dd></div>
+            <div><dt><kbd>b</kbd></dt><dd>Bookmark this session</dd></div>
             <div><dt><kbd>←</kbd><kbd>→</kbd></dt><dd>Step along the trace</dd></div>
           </dl>
         </article>
@@ -163,7 +164,7 @@ cart.go:16
         <p>Session logs hold prompts, file contents, command output and often secrets. trail is built so none of that goes anywhere.</p>
       </div>
       <ul class="checks">
-        <li><b>Read-only.</b> It reads agent storage and never writes to it. An export is saved only where you choose, and the file can't load or send anything.</li>
+        <li><b>Read-only.</b> It reads agent storage and never writes to it. Your notes and bookmarks go in a file of trail's own, readable only by you. An export is saved only where you choose, and the file can't load or send anything.</li>
         <li><b>Offline.</b> The UI is embedded in the binary, fonts included. Nothing loads from the network.</li>
         <li><b>Local.</b> It listens on 127.0.0.1 by default and only runs <code>git</code> on your machine.</li>
         <li><b>No dependencies.</b> One static Go binary, built from the standard library.</li>
