@@ -200,6 +200,8 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .sess .sub { grid-column: 2 / 4; display: flex; gap: 10px; min-width: 0; color: var(--faint); font-size: 11.5px; line-height: 1.5; }
 .sess .sub span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sess .sub .edits { color: var(--blaze); flex: none; }
+.sess .sub .cost { flex: none; margin-left: auto; font-variant-numeric: tabular-nums; }
+.folder-row .fcost { color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .more { display: block; margin: 2px 0 6px 18px; padding: 3px 8px; border: 0; background: none; color: var(--muted); font-size: 12px; cursor: pointer; border-radius: var(--r-sm); }
 .more:hover { color: var(--ink); background: var(--hover); }
 .tree .empty { padding: 24px 12px; color: var(--muted); font-size: 13px; }
@@ -256,6 +258,15 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .facts b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
 .facts .bad b { color: var(--del); }
 .facts .blz b { color: var(--blaze); }
+/* Tokens and API-equivalent cost. Neutral on purpose: the blaze is for changes. */
+.usage { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-top: 6px; color: var(--muted); font-size: 12.5px; cursor: default; }
+.usage b { color: var(--ink-2); font-weight: 600; font-variant-numeric: tabular-nums; }
+.usage .u-main b { color: var(--ink); }
+.usage .warn { color: var(--faint); font-style: italic; }
+.linkish { padding: 0; border: 0; background: none; color: var(--faint); font: inherit; font-size: 12px; text-decoration: underline dotted; text-underline-offset: 3px; cursor: pointer; }
+.linkish:hover { color: var(--ink-2); }
+.step-usage { display: flex; flex-wrap: wrap; gap: 2px 12px; margin: 2px 0 4px; color: var(--faint); font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums; cursor: default; }
+.step-usage .c { color: var(--muted); }
 .actions { display: flex; align-items: flex-start; gap: 8px; }
 .live {
   display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 4px; color: var(--add); font-size: 12.5px; font-weight: 600;

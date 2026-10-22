@@ -79,6 +79,26 @@ type geminiMessage struct {
 		Timestamp   string `json:"timestamp"`
 	} `json:"thoughts"`
 	ToolCalls []geminiToolCall `json:"toolCalls"`
+	Tokens    *geminiTokens    `json:"tokens"`
+}
+
+// geminiTokens is Gemini CLI's TokensSummary of the API's usage metadata.
+// input is the whole prompt, cached tokens included; thoughts and tool-use
+// prompt tokens are counted apart from output and input.
+type geminiTokens struct {
+	Input    int64 `json:"input"`
+	Output   int64 `json:"output"`
+	Cached   int64 `json:"cached"`
+	Thoughts int64 `json:"thoughts"`
+	Tool     int64 `json:"tool"`
+}
+
+func (g *geminiTokens) step(model string) step {
+	st := step{model: model}
+	st.CacheRead = min(g.Cached, g.Input)
+	st.Input = g.Input - st.CacheRead + g.Tool
+	st.Output, st.Reasoning = g.Output+g.Thoughts, g.Thoughts
+	return st
 }
 
 type geminiToolCall struct {
@@ -388,6 +408,13 @@ func (p *geminiProvider) ParseLines(r io.Reader, path string, full bool) (*Trans
 					c.Time = cts
 					t.addChange(c, idx)
 				}
+			}
+			if m.Tokens != nil {
+				ev := -1
+				if full {
+					ev = len(t.Events) - 1
+				}
+				t.addUsage(m.Tokens.step(m.Model), ev)
 			}
 		}
 	}

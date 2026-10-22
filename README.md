@@ -47,6 +47,7 @@ make build
 ./trail -open      # and open the browser
 ./trail -list      # print sessions by folder and exit
 ./trail -search "flaky login"   # print matching sessions and steps, and exit
+./trail -prices    # print the token prices used for costs, and exit
 ```
 
 On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop. Transcripts often contain secrets, so only do this on a network you trust (or tunnel the port over SSH instead).
@@ -62,6 +63,7 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | `-semantic` | off; see [Related sessions](#related-sessions-opt-in) |
 | `-embed-url` | `http://127.0.0.1:11434` (Ollama) |
 | `-embed-model` | `nomic-embed-text` |
+| `-prices` | print the price table and exit |
 
 ## What it reads
 
@@ -115,6 +117,24 @@ What changes when you turn it on:
 
 Queries that use `in:`, `tool:` or `file:` stay word searches, since the vectors don't know about fields, tools or files.
 
+## Tokens and cost
+
+Every agent records how many tokens each model response used, and trail adds them up: per session in the sidebar, per folder, in the session header (input, cache hits, cache writes, output and thinking), and per step in the transcript. Hover any figure for the full breakdown.
+
+The dollar figures are **API-equivalent**: what the same tokens cost at the provider's API list prices. On a Claude or ChatGPT subscription you pay a flat fee instead, and on Bedrock or Vertex prices differ. Click *Show tokens* in a session header to show token counts everywhere instead; trail remembers the choice.
+
+Each response is priced on its own, at its own model's rates, because cache pricing varies by model and some models charge more for long prompts (Claude Haiku 5.5 past 100K prompt tokens, GPT-5.5 past 272K, Gemini Pro past 200K). Claude's 5-minute and 1-hour cache writes, fast mode, US-only inference and web searches are priced as well. Usage in Claude Code subagent transcripts counts toward their session.
+
+Prices ship inside trail (`prices.json`, dated) and trail never fetches them. `./trail -prices` prints the table. To add a model or change a rate, put a `prices.json` in trail's config directory (`~/Library/Application Support/trail/` on macOS, `~/.config/trail/` on Linux) in the same shape; its entries replace the bundled ones for the models they list:
+
+```json
+{"prices": [
+  {"models": ["my-model"], "input": 1.0, "cacheRead": 0.1, "cacheWrite": 1.25, "output": 4.0}
+]}
+```
+
+Rates are USD per million tokens. A model with no price shows its tokens with the cost as "—", and a total that includes one reads "≥". OpenCode records its own cost for each step, which trail uses for models it has no price for.
+
 ## How diffs and commits are matched
 
 The Edits tab comes straight from the transcript: each change is the before/after text the agent sent to its edit tool, so it is exact for that step. A Claude Code `Write` replaces the whole file, and the transcript doesn't say what was there before, so every line shows as added.
@@ -137,6 +157,8 @@ semantic.go  opt-in related-session search over a local embedding model
 git.go       commits in the session window
 server.go    JSON API and embedded UI
 live.go      live updates for a session that is still being written
+usage.go     token counts per response and session
+prices.go    pricing, with the bundled prices.json and overrides
 web/         index.html, style.css, app.js (no build step)
 ```
 

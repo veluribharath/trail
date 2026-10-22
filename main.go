@@ -47,8 +47,17 @@ func main() {
 	embedURL := flag.String("embed-url", "http://127.0.0.1:11434", "embedding server for -semantic: Ollama, or an OpenAI-compatible URL ending in /v1")
 	embedModel := flag.String("embed-model", "nomic-embed-text", "embedding model for -semantic")
 	forget := flag.Bool("forget", false, "delete the vectors -semantic cached and exit")
+	showPrices := flag.Bool("prices", false, "print the token prices used for API-equivalent costs and exit")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
+
+	if err := loadPriceOverrides(pricesPath()); err != nil {
+		fmt.Fprintln(os.Stderr, "trail: ignoring price overrides:", err)
+	}
+	if *showPrices {
+		printPrices(os.Stdout)
+		return
+	}
 
 	if *showVersion {
 		fmt.Println("trail", currentVersion())
