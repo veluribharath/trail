@@ -19,7 +19,7 @@ import (
 )
 
 func exportIndex() *Index {
-	idx := NewIndex(&claudeProvider{dir: "testdata/claude"}, &codexProvider{dir: "testdata/codex"}, &opencodeProvider{dir: "testdata/opencode"})
+	idx := NewIndex(&claudeProvider{dir: "testdata/claude"}, &codexProvider{dir: "testdata/codex"}, &opencodeProvider{dir: "testdata/opencode"}, &geminiProvider{dir: "testdata/gemini"})
 	idx.Scan(0)
 	return idx
 }
@@ -33,7 +33,7 @@ var (
 
 func TestExportEveryProvider(t *testing.T) {
 	idx := exportIndex()
-	for _, key := range []string{"claude:c1", "codex:0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000", "opencode:ses_o1"} {
+	for _, key := range []string{"claude:c1", "codex:0199aaaa-bbbb-7ccc-8ddd-eeeeffff0000", "opencode:ses_o1", "gemini:1a2b3c4d-0000-4000-8000-000000000001"} {
 		tr, err := idx.Load(key)
 		if err != nil {
 			t.Fatalf("%s: %v", key, err)
