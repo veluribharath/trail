@@ -1491,7 +1491,9 @@ function openPalette(q = "") {
   $("#palette-q").focus();
   if (q) searchTranscripts();
 }
-function closePalette() { $("#palette").hidden = true; clearTimeout(palette.timer); palette.seq++; }
+// The input is blurred by hand: a hidden element can keep focus until the
+// next frame, and keys pressed before then would be typed into it.
+function closePalette() { $("#palette").hidden = true; $("#palette-q").blur(); clearTimeout(palette.timer); palette.seq++; }
 
 /* ---------------- stats ---------------- */
 const RANGES = [["7", "7 days"], ["30", "30 days"], ["90", "90 days"], ["365", "1 year"], ["all", "All time"]];
