@@ -133,8 +133,14 @@ func Blame(ctx context.Context, idx *Index, path string) BlameResult {
 			if r, err := filepath.Rel(res.Toplevel, abs); err == nil && !strings.HasPrefix(r, "..") {
 				res.Rel = filepath.ToSlash(r)
 			}
-			if out, err := git(ctx, res.Toplevel, "blame", "--line-porcelain", "--", res.Rel); err == nil {
+			out, err := git(ctx, res.Toplevel, "blame", "--line-porcelain", "--", res.Rel)
+			if err == nil {
 				lineSHA = parseBlame(out, &res, commitAt)
+			} else if _, lerr := git(ctx, res.Toplevel, "ls-files", "--error-unmatch", "--", res.Rel); lerr == nil {
+				// Tracked, yet blame failed (a timeout on a huge history):
+				// calling every line uncommitted would match edits from any time.
+				res.Reason = "git blame failed: " + firstLine(errText(err))
+				return res
 			}
 			// Otherwise the file isn't tracked yet (or the repository has no
 			// commits): every line is uncommitted, read below.

@@ -1462,7 +1462,8 @@ async function init() {
   if (!state.data) return;
   route();
   window.addEventListener("hashchange", route);
-  $("#refresh").onclick = async () => { await load(true); if (!state.current) renderHome(); };
+  const onHome = () => !state.current && !location.hash.startsWith("#f=");
+  $("#refresh").onclick = async () => { await load(true); if (onHome()) renderHome(); };
   $("#q").addEventListener("input", (e) => { state.q = e.target.value; renderSidebar(); });
   $("#q").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.target.value = ""; state.q = ""; renderSidebar(); e.target.blur(); } });
   $("#q").addEventListener("focus", () => ($("#q-hint").hidden = true));
@@ -1500,7 +1501,7 @@ async function init() {
   setInterval(async () => {
     if (document.hidden) return;
     const changed = await load();
-    if (changed && !state.current) renderHome();
+    if (changed && onHome()) renderHome();
     if (changed) startLive();
   }, 20000);
 }
