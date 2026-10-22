@@ -32,7 +32,7 @@
     <div class="providers" id="providers" role="group" aria-label="Show providers"></div>
     <nav class="tree" id="tree"></nav>
     <button class="side-foot" id="palette-open">
-      <span>Jump to a session</span><span class="keys"><kbd class="kbd" id="mod-key">⌘</kbd><kbd class="kbd">K</kbd></span>
+      <span>Search sessions</span><span class="keys"><kbd class="kbd" id="mod-key">⌘</kbd><kbd class="kbd">K</kbd></span>
     </button>
   </aside>
 
@@ -45,10 +45,10 @@
 </div>
 
 <div class="palette" id="palette" hidden>
-  <div class="palette-box" role="dialog" aria-modal="true" aria-label="Jump to a session">
+  <div class="palette-box" role="dialog" aria-modal="true" aria-label="Search sessions">
     <div class="palette-input">
       <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.25"/><path d="M10.2 10.2 13.5 13.5"/></svg>
-      <input id="palette-q" placeholder="Search every session by name, prompt or folder" autocomplete="off" spellcheck="false" aria-label="Search sessions" aria-controls="palette-list">
+      <input id="palette-q" placeholder="Search sessions and everything said in them" autocomplete="off" spellcheck="false" aria-label="Search sessions" aria-controls="palette-list">
       <kbd class="kbd">esc</kbd>
     </div>
     <div class="palette-list" id="palette-list" role="listbox"></div>
