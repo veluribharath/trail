@@ -27,7 +27,8 @@ type exportData struct {
 	Home       string            `json:"home"`
 	Transcript *Transcript       `json:"transcript"`
 	Commits    CommitsResult     `json:"commits"`
-	Patches    map[string]string `json:"patches"` // sha -> git show output
+	Patches    map[string]string `json:"patches"`         // sha -> git show output
+	Notes      *SessionNotes     `json:"notes,omitempty"` // the person's notes, when they chose to include them
 }
 
 const maxExportCommits = 30
@@ -38,7 +39,13 @@ var fontURL = regexp.MustCompile(`url\("fonts/([a-z0-9.-]+\.woff2)"\)`)
 // only when they touch a file the session edited, each with its patch, so
 // the file carries what the session did and not the rest of the repository.
 func ExportHTML(ctx context.Context, w io.Writer, t *Transcript, home, version string) error {
-	data := exportData{Version: version, Exported: time.Now().UTC(), Home: home, Transcript: t, Patches: map[string]string{}}
+	return ExportHTMLNotes(ctx, w, t, home, version, nil)
+}
+
+// ExportHTMLNotes is ExportHTML with the person's notes and bookmarks on the
+// page, read-only. nil leaves them out.
+func ExportHTMLNotes(ctx context.Context, w io.Writer, t *Transcript, home, version string, notes *SessionNotes) error {
+	data := exportData{Version: version, Exported: time.Now().UTC(), Home: home, Transcript: t, Patches: map[string]string{}, Notes: notes}
 	data.Commits = SessionCommits(ctx, t)
 	kept := data.Commits.Commits[:0]
 	for _, c := range data.Commits.Commits {

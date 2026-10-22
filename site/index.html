@@ -104,7 +104,7 @@
         <article class="card">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h3l2-6 4 12 2-6h5"/></svg>
           <h3>Read a session at a glance</h3>
-          <p>Switch between every step, just the conversation, or only edits and failures. File totals show how much each file changed.</p>
+          <p>Switch between every step, just the conversation, or only edits and failures. Bookmark a session or the one step that matters, and leave yourself a note; ⌘K lists your bookmarks first.</p>
         </article>
         <article class="card">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/></svg>
@@ -119,6 +119,7 @@
             <div><dt><kbd>⌘</kbd><kbd>K</kbd></dt><dd>Jump to any session</dd></div>
             <div><dt><kbd>/</kbd></dt><dd>Filter the sidebar</dd></div>
             <div><dt><kbd>j</kbd><kbd>k</kbd></dt><dd>Next and previous session</dd></div>
+            <div><dt><kbd>b</kbd></dt><dd>Bookmark this session</dd></div>
             <div><dt><kbd>←</kbd><kbd>→</kbd></dt><dd>Step along the trace</dd></div>
           </dl>
         </article>
@@ -133,7 +134,7 @@
         <p>Session logs hold prompts, file contents, command output and often secrets. trail is built so none of that goes anywhere.</p>
       </div>
       <ul class="checks">
-        <li><b>Read-only.</b> It reads agent storage and never writes to it. An export is saved only where you choose, and the file can't load or send anything.</li>
+        <li><b>Read-only.</b> It reads agent storage and never writes to it. Your notes and bookmarks go in a file of trail's own, readable only by you. An export is saved only where you choose, and the file can't load or send anything.</li>
         <li><b>Offline.</b> The UI is embedded in the binary, fonts included. Nothing loads from the network.</li>
         <li><b>Local.</b> It listens on 127.0.0.1 by default and only runs <code>git</code> on your machine.</li>
         <li><b>No dependencies.</b> One static Go binary, built from the standard library.</li>

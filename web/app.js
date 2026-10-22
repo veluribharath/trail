@@ -25,6 +25,8 @@ const state = {
   pane: "log",
   find: null, // { q, key, events, i }: transcript search matches in the open session
   pendingJump: null, // { event, field } to show once a session opened from search renders
+  notes: {}, // session key -> { bookmarked, note, steps: [{ event, label, note }] }
+  onlyMarked: false, // sidebar shows only sessions with notes or bookmarks
 };
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -100,6 +102,194 @@ function usageLines(u, step) {
   return lines.join("\n");
 }
 
+/* ---------------- notes and bookmarks ---------------- */
+// The person can bookmark a session or any of its steps and write a note on
+// either. trail keeps them in its own notes file, never in agent storage.
+// Edits show at once and are saved a moment later; a refresh of the session
+// list leaves alone anything not saved yet.
+const notesSave = { timers: new Map(), inflight: new Map(), chain: Promise.resolve() };
+const notesOf = (key) => state.notes[key] || null;
+const hasNotes = (n) => !!n && !!(n.bookmarked || n.note || n.steps?.length);
+const stepMark = (key, i) => notesOf(key)?.steps?.find((m) => m.event === i) || null;
+const notesDirty = (key) => notesSave.timers.has(key) || (notesSave.inflight.get(key) || 0) > 0;
+const marksShape = (n) => (n ? `${!!n.bookmarked}${!!n.note}${(n.steps || []).map((m) => m.event + (m.note ? "n" : "")).join(",")}` : "");
+
+// stepLabel is one line of a step, kept with its bookmark so a list of
+// bookmarks reads without opening the session.
+function stepLabel(e) {
+  if (!e) return "";
+  const text = e.kind === "tool" ? `${e.tool}${e.summary ? ": " + e.summary : ""}` : e.kind === "thinking" ? "Thinking" : e.text || "";
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length > 200 ? line.slice(0, 199) + "…" : line;
+}
+
+// updateNotes changes one session's notes in place and schedules the save.
+// Typing waits for a pause; clicks save at once.
+function updateNotes(key, fn, delay = 0) {
+  const before = notesOf(key);
+  const n = before ? structuredClone(before) : { bookmarked: false, note: "", steps: [] };
+  n.steps ||= [];
+  fn(n);
+  n.steps.sort((a, b) => a.event - b.event);
+  n.updated = new Date().toISOString();
+  if (hasNotes(n)) state.notes[key] = n; else delete state.notes[key];
+  if (marksShape(before) !== marksShape(notesOf(key))) { renderSidebar(); trace.draw(); }
+  clearTimeout(notesSave.timers.get(key));
+  notesSave.timers.set(key, setTimeout(() => { notesSave.timers.delete(key); pushNotes(key); }, delay));
+}
+
+function pushNotes(key) {
+  const n = notesOf(key) || {};
+  const body = JSON.stringify({ bookmarked: !!n.bookmarked, note: n.note || "", steps: (n.steps || []).map(({ event, label, note }) => ({ event, label, note })) });
+  notesSave.inflight.set(key, (notesSave.inflight.get(key) || 0) + 1);
+  notesSave.chain = notesSave.chain.then(async () => {
+    try {
+      const r = await fetch("/api/notes?id=" + encodeURIComponent(key), { method: "PUT", headers: { "Content-Type": "application/json" }, body });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(b.error || `Request failed (${r.status})`);
+      if (state.current === key) noteStatus(n.note || n.steps?.some((m) => m.note) ? "Saved" : "");
+    } catch (e) {
+      if (state.current === key) noteStatus(`Not saved: ${e.message}`, true);
+    } finally {
+      notesSave.inflight.set(key, notesSave.inflight.get(key) - 1);
+    }
+  });
+}
+
+function noteStatus(msg, bad) {
+  const el = $(".s-notes .note-status");
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.toggle("bad", !!bad);
+}
+
+// growArea sizes a note's text box to what's in it.
+function growArea(ta) {
+  ta.style.height = "auto";
+  ta.style.height = Math.min(ta.scrollHeight + 2, 360) + "px";
+}
+
+function toggleBookmark() {
+  const key = state.current;
+  if (!key || EXPORTED || !state.transcript) return;
+  updateNotes(key, (n) => { n.bookmarked = !n.bookmarked; });
+  const b = $("#bookmark");
+  if (b) setBookmarkButton(b, !!notesOf(key)?.bookmarked);
+}
+
+function setBookmarkButton(b, on) {
+  b.setAttribute("aria-pressed", on);
+  b.classList.toggle("on", on);
+  $("span", b).textContent = on ? "Bookmarked" : "Bookmark";
+}
+
+// sessionNotes is the session's own note, under its header: a text box in
+// trail, read-only text in an export.
+function sessionNotes() {
+  const t = state.transcript, key = t.session.key, n = notesOf(key);
+  const el = h(`<section class="s-notes" aria-label="Notes"></section>`);
+  if (EXPORTED) {
+    if (n?.note) el.append(h(`<div class="note-read">${svg("note")}<div class="text">${richText(n.note)}</div></div>`));
+    return el;
+  }
+  const open = () => {
+    el.innerHTML = "";
+    const ta = h(`<textarea class="note-in" rows="2" placeholder="Notes on this session. They stay on this machine, in trail’s own notes file." aria-label="Notes on this session"></textarea>`);
+    ta.value = notesOf(key)?.note || "";
+    ta.addEventListener("input", () => { growArea(ta); noteStatus("Saving…"); updateNotes(key, (x) => { x.note = ta.value; }, 600); });
+    ta.addEventListener("keydown", (e) => { if (e.key === "Escape") ta.blur(); });
+    el.append(ta, h(`<span class="note-status" aria-live="polite"></span>`));
+    requestAnimationFrame(() => growArea(ta));
+    return ta;
+  };
+  if (n?.note) open();
+  else {
+    const b = h(`<button class="linkish add-note">${svg("note")}Add a note</button>`);
+    b.onclick = () => open().focus();
+    el.append(b);
+  }
+  return el;
+}
+
+// renderMark draws a step's bookmark: the toggle on the row, and the step's
+// note under it once marked.
+function renderMark(row, i) {
+  const key = state.transcript.session.key, m = stepMark(key, i);
+  row.classList.toggle("marked", !!m);
+  $(".step-note", row)?.remove();
+  let btn = $(".mark-btn", row);
+  if (!EXPORTED && !btn) {
+    btn = h(`<button class="mark-btn" title="Bookmark this step">${svg("star")}</button>`);
+    btn.onclick = (ev) => { ev.stopPropagation(); toggleStep(i); };
+    row.append(btn);
+  }
+  if (btn) {
+    btn.setAttribute("aria-pressed", !!m);
+    btn.setAttribute("aria-label", m ? "Remove this step’s bookmark" : "Bookmark this step");
+    btn.title = m ? "Remove bookmark" : "Bookmark this step";
+  }
+  if (!m) return;
+  const body = $(".body", row);
+  if (EXPORTED) {
+    body.append(h(`<div class="step-note">${svg("star")}${m.note ? `<div class="text">${richText(m.note)}</div>` : `<span class="k">Bookmarked</span>`}</div>`));
+    return;
+  }
+  const box = h(`<div class="step-note">${svg("star")}<textarea rows="1" placeholder="Bookmarked. Add a note to this step…" aria-label="Note on this step"></textarea></div>`);
+  const ta = $("textarea", box);
+  ta.value = m.note || "";
+  ta.addEventListener("input", () => {
+    growArea(ta);
+    updateNotes(key, (x) => { const s = x.steps.find((y) => y.event === i); if (s) s.note = ta.value; }, 600);
+  });
+  ta.addEventListener("keydown", (e) => { if (e.key === "Escape") ta.blur(); });
+  body.append(box);
+  requestAnimationFrame(() => growArea(ta));
+  return ta;
+}
+
+function toggleStep(i) {
+  const t = state.transcript, key = t.session.key, m = stepMark(key, i);
+  if (m?.note && !confirm("Remove this bookmark and its note?")) return;
+  updateNotes(key, (n) => {
+    if (m) n.steps = n.steps.filter((x) => x.event !== i);
+    else n.steps.push({ event: i, label: stepLabel(t.events[i]), note: "" });
+  });
+  const row = document.getElementById("ev-" + i);
+  if (!row) return;
+  const ta = renderMark(row, i);
+  if (ta) ta.focus();
+  updateLegend();
+  trace.update();
+}
+
+function updateLegend() {
+  const lg = $(".trace-legend .lg-mark-item");
+  if (lg) lg.hidden = !notesOf(state.transcript?.session.key)?.steps?.length;
+}
+
+// bookmarkItems lists bookmarks for the palette: a session bookmarked or
+// annotated, and each bookmarked step, newest first.
+function bookmarkItems(q) {
+  const out = [];
+  const byKey = new Map(state.data.sessions.map((s) => [s.key, s]));
+  const keys = Object.keys(state.notes).sort((a, b) => ((state.notes[a].updated || "") < (state.notes[b].updated || "") ? 1 : -1));
+  const hit = (...v) => !q || v.some((x) => x && x.toLowerCase().includes(q));
+  for (const key of keys) {
+    const s = byKey.get(key), n = state.notes[key];
+    if (!s) continue;
+    if ((n.bookmarked || n.note) && hit(s.title, s.prompt, n.note)) out.push({ s, notes: n });
+    for (const m of n.steps || []) if (hit(m.label, m.note, s.title)) out.push({ s, mark: m });
+  }
+  return out;
+}
+
+// openMark opens a session at a bookmarked step.
+function openMark(key, ev) {
+  if (state.current === key && state.transcript?.session.key === key) { focusEvent(ev); return; }
+  state.pendingJump = { event: ev };
+  go(key);
+}
+
 /* ---------------- icons ---------------- */
 const ICON = {
   file: '<path d="M4.5 2.5h4.5l2.5 2.5v8.5h-7z"/><path d="M9 2.5V5h2.5"/>',
@@ -119,6 +309,8 @@ const ICON = {
   branch: '<circle cx="5" cy="3.8" r="1.4"/><circle cx="5" cy="12.2" r="1.4"/><circle cx="11" cy="6" r="1.4"/><path d="M5 5.2v5.6M11 7.4c0 2.4-6 1.6-6 3.4"/>',
   clock: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',
   chip: '<rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"/>',
+  star: '<path d="M8 2.4l1.7 3.5 3.8.55-2.75 2.7.65 3.8L8 11.15l-3.4 1.8.65-3.8L2.5 6.45l3.8-.55z"/>',
+  note: '<path d="M3.5 3h9v6.5L9.5 12.5h-6z"/><path d="M9.5 12.5v-3h3M5.5 6h5M5.5 8.5h2.5"/>',
 };
 const svg = (name, cls = "") => `<svg class="${cls}" viewBox="0 0 16 16" aria-hidden="true">${ICON[name]}</svg>`;
 
@@ -174,11 +366,13 @@ function tildify(p) {
 
 /* ---------------- sidebar ---------------- */
 function matches(s, q) {
-  return [s.title, s.prompt, s.cwd, s.branch, s.id].some((v) => v && v.toLowerCase().includes(q));
+  const n = notesOf(s.key);
+  return [s.title, s.prompt, s.cwd, s.branch, s.id, n?.note, ...(n?.steps || []).flatMap((m) => [m.note, m.label])]
+    .some((v) => v && v.toLowerCase().includes(q));
 }
 function visibleSessions() {
   const q = state.q.trim().toLowerCase();
-  return state.data.sessions.filter((s) => !state.hidden.has(s.provider) && (!q || matches(s, q)));
+  return state.data.sessions.filter((s) => !state.hidden.has(s.provider) && (!state.onlyMarked || hasNotes(notesOf(s.key))) && (!q || matches(s, q)));
 }
 
 function buildTree(sessions) {
@@ -242,6 +436,13 @@ function renderProviders() {
     };
     el.append(b);
   }
+  const marked = state.data.sessions.filter((s) => hasNotes(notesOf(s.key))).length;
+  if (!marked) state.onlyMarked = false;
+  if (marked || state.onlyMarked) {
+    const b = h(`<button class="chip marks" aria-pressed="${state.onlyMarked}" title="Show only sessions you bookmarked or wrote notes on">${svg("star")}Bookmarks<span class="n">${marked}</span></button>`);
+    b.onclick = () => { state.onlyMarked = !state.onlyMarked; renderSidebar(); };
+    el.append(b);
+  }
 }
 
 function renderSidebar() {
@@ -253,12 +454,16 @@ function renderSidebar() {
     tree.append(h(`<div class="empty">No sessions yet. Run Claude Code, Codex, OpenCode, Gemini CLI or Kiro CLI in a project, then rescan.</div>`));
     return;
   }
+  if (!sessions.length && state.onlyMarked && !state.q.trim()) {
+    tree.append(h(`<div class="empty">None of your bookmarked sessions are from the providers shown. Turn one back on, or turn off Bookmarks.</div>`));
+    return;
+  }
   if (!sessions.length) {
-    tree.append(h(`<div class="empty">No session name matches “${esc(state.q)}”. Clear the filter or turn a provider back on.</div>`));
+    tree.append(h(`<div class="empty">No session ${state.onlyMarked ? "you bookmarked " : ""}matches “${esc(state.q)}”. Clear the filter${state.onlyMarked ? ", turn off Bookmarks," : ""} or turn a provider back on.</div>`));
     tree.append(deepSearchRow());
     return;
   }
-  const filtering = state.q.trim() !== "";
+  const filtering = state.q.trim() !== "" || state.onlyMarked;
   const byRecent = (a, b) => (a.latest < b.latest ? 1 : -1);
   const folder = (node) => {
     const open = filtering || state.expanded.get(node.path) !== false;
@@ -289,7 +494,7 @@ function renderSidebar() {
   const root = buildTree(sessions);
   for (const kid of [...root.kids.values()].sort(byRecent)) tree.append(folder(kid));
   for (const s of root.sessions) tree.append(sessionRow(s));
-  if (filtering) tree.append(deepSearchRow());
+  if (state.q.trim()) tree.append(deepSearchRow());
 }
 
 // deepSearchRow hands the sidebar filter to the palette, which also searches
@@ -307,10 +512,13 @@ function sessionRow(s) {
   if (s.branch) bits.push(`<span>${esc(s.branch)}</span>`);
   if (s.edits) bits.push(`<span class="edits">${plural(s.edits, "edit")}</span>`);
   if (s.usage) bits.push(`<span class="cost">${esc(usageShort(s.usage))}</span>`);
-  const tip = s.titleKind !== "prompt" && s.prompt ? `${s.title}\n\n${s.prompt}` : s.prompt || s.title;
+  const n = notesOf(s.key);
+  let tip = s.titleKind !== "prompt" && s.prompt ? `${s.title}\n\n${s.prompt}` : s.prompt || s.title;
+  if (n?.note) tip += `\n\nYour note: ${n.note}`;
+  const marks = hasNotes(n) ? `<span class="marks">${n.bookmarked ? `<span title="Bookmarked">${svg("star", "on")}</span>` : ""}${n.note || n.steps?.some((m) => m.note) ? `<span title="Has notes">${svg("note")}</span>` : ""}${n.steps?.length ? `<span class="n" title="${plural(n.steps.length, "bookmarked step")}">${n.steps.length}</span>` : ""}</span>` : "";
   const el = h(`<button class="sess" data-key="${esc(s.key)}" aria-current="${s.key === state.current}" title="${esc(tip)}">
     <span class="pmark ${esc(s.provider)}" aria-label="${esc(PROVIDERS[s.provider] || s.provider)}"></span>
-    <span class="t ${s.titleKind === "prompt" ? "unnamed" : ""}">${esc(s.title)}</span><span class="when">${esc(ago(s.ended))}</span>
+    <span class="t ${s.titleKind === "prompt" ? "unnamed" : ""}">${esc(s.title)}</span><span class="when">${marks}${esc(ago(s.ended))}</span>
     ${bits.length ? `<span class="sub">${bits.join("")}</span>` : ""}</button>`);
   el.onclick = () => go(s.key);
   return el;
@@ -502,12 +710,18 @@ function sessionHeader() {
         <div class="facts">${facts}</div>
         ${usage}
       </div>
-      <div class="actions">${EXPORTED ? exportedActions() : `<span class="live" ${live.on ? "" : "hidden"} title="The agent is still writing this session. New steps appear as it works.">Live</span><button class="btn" id="export" title="Save this session as one HTML file">${svg("download")}<span>Export</span></button><button class="btn" id="copy" title="${esc(s.resume)}">${svg("copy")}<span>Copy resume command</span></button>`}</div>
+      <div class="actions">${EXPORTED ? exportedActions() : `<span class="live" ${live.on ? "" : "hidden"} title="The agent is still writing this session. New steps appear as it works.">Live</span><button class="btn bookmark" id="bookmark" aria-pressed="false" title="Bookmark this session (B)">${svg("star")}<span>Bookmark</span></button><button class="btn" id="export" title="Save this session as one HTML file">${svg("download")}<span>Export</span></button><button class="btn" id="copy" title="${esc(s.resume)}">${svg("copy")}<span>Copy resume command</span></button>`}</div>
     </header>`);
   const tog = $("#usage-toggle", head);
   if (tog) tog.onclick = (e) => { e.stopPropagation(); setUsagePref(!usagePref.tokens); };
-  if (EXPORTED) { setupExportFind(head); return head; }
+  if (EXPORTED) {
+    setupExportFind(head);
+    if (notesOf(s.key)?.bookmarked) $(".titles h1", head).insertAdjacentHTML("afterbegin", `<span class="h-star" title="Bookmarked">${svg("star", "on")}</span>`);
+    return head;
+  }
   $("#export", head).onclick = () => exportDialog(s);
+  setBookmarkButton($("#bookmark", head), !!notesOf(s.key)?.bookmarked);
+  $("#bookmark", head).onclick = toggleBookmark;
   $("#copy", head).onclick = async (e) => {
     const b = e.currentTarget, label = $("span", b);
     try {
@@ -526,9 +740,12 @@ function exportDialog(s) {
     <h2 id="dlg-title">Export this session</h2>
     <p>Saves the transcript, its edits and the commits that touch them as one HTML file. It opens in any browser without trail and never goes online.</p>
     <p class="warn">Transcripts can contain secrets: API keys, tokens, environment variables, file contents and command output. Read the file before you share it.</p>
+    ${hasNotes(notesOf(s.key)) ? `<label class="dlg-check"><input type="checkbox" checked> Include my notes and bookmarks</label>` : ""}
     <div class="dlg-actions"><button class="btn" value="cancel">Cancel</button><a class="btn primary" href="/api/export?id=${encodeURIComponent(s.key)}" download>${svg("download")}<span>Download HTML</span></a></div>
   </form></dialog>`);
-  $("a", d).onclick = () => setTimeout(() => d.close(), 0);
+  const a = $("a", d), check = $(".dlg-check input", d);
+  if (check) check.onchange = () => { a.href = `/api/export?id=${encodeURIComponent(s.key)}${check.checked ? "" : "&notes=0"}`; };
+  a.onclick = () => setTimeout(() => d.close(), 0);
   d.addEventListener("close", () => d.remove());
   document.body.append(d);
   d.showModal();
@@ -580,6 +797,7 @@ function initExport() {
   state.diffs = t.changes.map(changeDiff);
   state.stats = sessionStats(t);
   state.commits = EXPORTED.commits;
+  if (EXPORTED.notes) state.notes = { [t.session.key]: EXPORTED.notes };
   if (!t.changes.length) state.tab = "commits";
   renderSession();
   document.addEventListener("keydown", (e) => {
@@ -600,7 +818,7 @@ function renderSession() {
       <div class="trace" id="trace" role="slider" tabindex="0" aria-label="Session trace. Drag or use arrow keys to move through the transcript." aria-valuemin="1" aria-valuemax="${t.events.length}" aria-valuenow="1">
         <div class="win"></div><canvas></canvas>
       </div>
-      <div class="trace-legend"><span><i class="lg-prompt"></i>Prompt</span><span><i class="lg-tool"></i>Tool call</span><span><i class="lg-edit"></i>Edit</span><span><i class="lg-err"></i>Failed</span><span class="find" id="find" hidden></span></div>
+      <div class="trace-legend"><span><i class="lg-prompt"></i>Prompt</span><span><i class="lg-tool"></i>Tool call</span><span><i class="lg-edit"></i>Edit</span><span><i class="lg-err"></i>Failed</span><span class="lg-mark-item" hidden><i class="lg-mark"></i>Bookmark</span><span class="find" id="find" hidden></span></div>
     </div>
     <div class="panes" data-show="${state.pane}">
       <div class="pane-tabs"><div class="seg" role="tablist">
@@ -620,7 +838,7 @@ function renderSession() {
       <section class="pane ch" aria-label="Changes"></section>
     </div></div>`);
 
-  el.prepend(sessionHeader());
+  el.prepend(sessionHeader(), sessionNotes());
   $$(".pane-tabs button", el).forEach((b) => (b.onclick = () => setPane(b.dataset.pane)));
   $$("[data-f]", el).forEach((b) => (b.onclick = () => { state.filter = b.dataset.f; applyFilter(); }));
   view.append(el);
@@ -629,6 +847,7 @@ function renderSession() {
   renderChangesPane();
   setupTrace();
   renderFind();
+  updateLegend();
 }
 
 function setPane(p) {
@@ -664,6 +883,7 @@ function renderLog(root, from = 0) {
     return;
   }
   const frag = document.createDocumentFragment();
+  const marked = new Set((notesOf(t.session.key)?.steps || []).map((m) => m.event));
   let lastClock = "";
   for (let i = from - 1; i >= 0 && !lastClock; i--) lastClock = clock(t.events[i].time);
   t.events.forEach((e, i) => {
@@ -711,6 +931,7 @@ function renderLog(root, from = 0) {
         ${usagePref.tokens ? "" : `<span class="c">${esc(costLabel(u))}</span>`}
         ${u.responses > 1 ? `<span>${u.responses} responses</span>` : ""}</div>`));
     }
+    if (marked.has(i) || !EXPORTED) renderMark(row, i);
     frag.append(row);
   });
   root.append(frag);
@@ -772,6 +993,13 @@ const trace = {
       ctx.roundRect ? ctx.roundRect(x, mid - hgt / 2, bw, hgt, bw / 2) : ctx.rect(x, mid - hgt / 2, bw, hgt);
       ctx.fill();
     });
+    const marks = notesOf(t.session.key)?.steps;
+    if (marks?.length) {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = col("--blaze");
+      const mw = Math.max(3, bw + 1);
+      for (const m of marks) if (m.event < t.events.length) ctx.fillRect(this.xOf(m.event) - mw / 2, H - 4, mw, 4);
+    }
     const f = activeFind();
     if (f) {
       ctx.globalAlpha = 1;
@@ -815,6 +1043,8 @@ const trace = {
     else if (ev.kind === "assistant") label = `<span class="k">Reply</span><br>${esc(ev.text.slice(0, 160))}`;
     else if (ev.kind === "thinking") label = `<span class="k">Thinking</span>`;
     else label = `<span class="k">${esc(ev.tool)}${ev.error ? " failed" : ev.changes?.length ? `, ${plural(ev.changes.length, "edit")}` : ""}</span><br>${esc(ev.summary || "")}`;
+    const m = stepMark(state.transcript.session.key, e);
+    if (m) label += `<br><span class="k">★ ${m.note ? esc(m.note.slice(0, 160)) : "Bookmarked"}</span>`;
     const c = clock(ev.time);
     tip.innerHTML = (c ? `<span class="k">${esc(c)}</span>&ensp;` : "") + label;
     tip.hidden = false;
@@ -1172,22 +1402,30 @@ function renderPalette() {
   const q = raw.trim().toLowerCase();
   const list = $("#palette-list");
   const byKey = new Map(state.data.sessions.map((s) => [s.key, s]));
-  palette.items = state.data.sessions
+  const marks = bookmarkItems(q).slice(0, q ? 6 : 8);
+  palette.items = [...marks, ...state.data.sessions
     .map((s) => [score(s, q), s]).filter(([sc]) => sc > 0)
     .sort((a, b) => b[0] - a[0] || (a[1].ended < b[1].ended ? 1 : -1))
-    .slice(0, q ? 6 : 40).map(([, s]) => ({ s }));
-  const nNamed = palette.items.length;
+    .slice(0, q ? 6 : 40).map(([, s]) => ({ s }))];
+  const nMarks = marks.length, nNamed = palette.items.length;
   const r = q && palette.hits?.q === raw ? palette.hits.r : null;
   if (r) for (const sh of r.sessions) if (byKey.has(sh.key) && sh.hits.length) palette.items.push({ s: byKey.get(sh.key), sh });
   palette.sel = Math.min(palette.sel, Math.max(0, palette.items.length - 1));
   list.innerHTML = "";
 
   palette.items.forEach((it, i) => {
-    if (q && i === 0 && nNamed) list.append(h(`<div class="palette-group">Sessions</div>`));
+    if (i === 0 && nMarks) list.append(h(`<div class="palette-group">Bookmarks</div>`));
+    if (i === nMarks && i < nNamed && (q || nMarks)) list.append(h(`<div class="palette-group">${q ? "Sessions" : "Recent"}</div>`));
     if (i === nNamed) list.append(h(`<div class="palette-group">In transcripts</div>`));
     const s = it.s, where = esc([tildify(s.root), s.branch].filter(Boolean).join("   "));
     let row;
-    if (!it.sh) {
+    if (it.mark || it.notes) {
+      const text = it.mark ? `<span class="k">Step ${it.mark.event + 1}</span>${hilite(it.mark.note || it.mark.label, q)}` : `<span class="k">${it.notes.bookmarked ? "Session" : "Note"}</span>${it.notes.note ? hilite(it.notes.note, q) : esc(s.prompt || "")}`;
+      row = h(`<button class="prow hrow mrow" role="option" aria-selected="${i === palette.sel}">${svg("star", "on")}
+        <span class="t">${hilite(s.title, q)}</span><span class="when">${esc(ago(s.ended))}</span>
+        <span class="snip">${text}</span>
+        <span class="where">${it.mark && it.mark.note ? esc(it.mark.label) + `<span class="sep"></span>` : ""}${where}</span></button>`);
+    } else if (!it.sh) {
       row = h(`<button class="prow" role="option" aria-selected="${i === palette.sel}"><span class="pmark ${esc(s.provider)}"></span>
         <span class="t">${hilite(s.title, q)}</span><span class="when">${esc(ago(s.ended))}</span>
         <span class="where">${where}</span></button>`);
@@ -1233,7 +1471,8 @@ async function searchTranscripts() {
 
 function choosePalette(it) {
   closePalette();
-  if (it.sh) openMatch(it.sh, it.sh.hits[0], palette.hits.q);
+  if (it.mark) openMark(it.s.key, it.mark.event);
+  else if (it.sh) openMatch(it.sh, it.sh.hits[0], palette.hits.q);
   else go(it.s.key);
 }
 function markPalette() {
@@ -1271,11 +1510,20 @@ async function load(refresh = false) {
   btn.classList.add("spin");
   try {
     const data = await api("/api/sessions" + (refresh ? "?refresh=1" : ""));
+    // Notes edited here and not saved yet win over the server's copy.
+    const notes = data.notes || {};
+    for (const key of Object.keys(state.notes)) if (notesDirty(key)) notes[key] = state.notes[key];
+    for (const key of Object.keys(notes)) if (notesDirty(key) && !state.notes[key]) delete notes[key];
+    const marks = Object.keys(notes).sort().map((k) => k + marksShape(notes[k]) + (notes[k].note || "")).join("|");
     const sig = data.sessions.map((s) => s.key + s.ended + s.edits + s.title).join("|");
     const changed = sig !== state.sig;
+    const marksChanged = marks !== state.marksSig;
     state.data = data;
+    state.notes = notes;
     state.sig = sig;
-    if (changed || refresh) renderSidebar();
+    state.marksSig = marks;
+    if (data.notesError && !state.notesWarned) { state.notesWarned = true; console.warn("trail: notes:", data.notesError); }
+    if (changed || marksChanged || refresh) renderSidebar();
     return changed;
   } catch (e) {
     if (!state.data) $("#view").innerHTML = `<div class="empty-pane"><strong>trail isn’t responding</strong>${esc(e.message)}. Check that the trail process is still running.</div>`;
@@ -1334,6 +1582,7 @@ async function init() {
     if (e.key === "j") moveSession(1);
     if (e.key === "k") moveSession(-1);
     if (e.key === "n" || e.key === "N") stepFind(e.shiftKey ? -1 : 1);
+    if (e.key === "b") toggleBookmark();
   });
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => trace.draw());
   setInterval(async () => {

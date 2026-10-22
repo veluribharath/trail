@@ -162,6 +162,14 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .chip[aria-pressed="false"] .pmark { opacity: .35; }
 .chip[disabled] { opacity: .45; cursor: default; box-shadow: none; }
 .chip .n { color: var(--faint); font-variant-numeric: tabular-nums; }
+.chip.marks svg { width: 12px; height: 12px; color: var(--blaze); }
+.chip.marks[aria-pressed="true"] svg { fill: var(--blaze); }
+svg.on { fill: currentColor; }
+
+/* notes and bookmarks: the blaze marks what the person picked out */
+.sess .marks { display: inline-flex; align-items: center; gap: 3px; margin-right: 6px; vertical-align: -1px; color: var(--blaze); }
+.sess .marks svg { width: 11px; height: 11px; }
+.sess .marks .n { font-size: 10.5px; font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* provider mark: a small rounded square, reads as a badge rather than a status dot */
 .pmark { width: 9px; height: 9px; border-radius: 3px; flex: none; background: var(--faint); }
@@ -242,7 +250,7 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .src .state.missing { color: var(--faint); }
 
 /* ================= session ================= */
-.session { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr); height: 100%; }
+.session { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto auto minmax(0, 1fr); height: 100%; }
 .s-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 24px; padding: 22px 28px 14px; }
 .s-head .titles { min-width: 0; }
 .s-head h1 { margin: 0; font-size: 22px; font-weight: 620; letter-spacing: -0.022em; line-height: 1.25; font-stretch: 95%; overflow-wrap: anywhere; }
@@ -287,6 +295,27 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .btn svg { width: 15px; height: 15px; color: var(--muted); }
 .btn.done { border-color: var(--add); color: var(--add); }
 .btn.done svg { color: var(--add); }
+.btn.bookmark.on { border-color: var(--blaze-line); background: var(--blaze-fill); color: var(--blaze-ink); }
+.btn.bookmark.on svg { color: var(--blaze); fill: var(--blaze); }
+.h-star { display: inline-flex; margin-right: 8px; color: var(--blaze); vertical-align: 1px; }
+.h-star svg { width: 17px; height: 17px; }
+.dlg-check { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; color: var(--ink-2); font-size: 13.5px; cursor: pointer; }
+
+.s-notes { padding: 0 28px; }
+.s-notes:not(:empty) { padding-bottom: 12px; }
+.s-notes .add-note { display: inline-flex; align-items: center; gap: 6px; text-decoration: none; }
+.s-notes .add-note svg { width: 13px; height: 13px; }
+.note-in, .step-note textarea {
+  display: block; width: 100%; max-width: 90ch; resize: vertical; padding: 8px 11px; border: 1px solid var(--blaze-line); border-radius: var(--r);
+  background: var(--blaze-fill); color: var(--ink); font: inherit; font-size: 13px; line-height: 1.5;
+}
+.note-in:focus, .step-note textarea:focus { outline: none; box-shadow: 0 0 0 3px var(--blaze-fill); border-color: var(--blaze); }
+.note-in::placeholder, .step-note textarea::placeholder { color: var(--faint); }
+.note-status { display: block; min-height: 16px; margin-top: 3px; color: var(--faint); font-size: 11.5px; }
+.note-status.bad { color: var(--del); }
+.note-read { display: flex; gap: 9px; max-width: 90ch; padding: 9px 12px; border: 1px solid var(--blaze-line); border-radius: var(--r); background: var(--blaze-fill); }
+.note-read svg { flex: none; margin-top: 2px; width: 14px; height: 14px; color: var(--blaze); }
+.note-read .text { color: var(--ink); font-size: 13px; }
 
 .btn.primary { background: var(--ink); border-color: var(--ink); color: var(--raised); }
 .btn.primary svg { color: var(--raised); }
@@ -332,6 +361,8 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .lg-edit { height: 10px; background: var(--blaze); }
 .lg-err { height: 10px; background: var(--del); }
 .lg-find { width: 9px !important; height: 3px; background: var(--find); }
+.lg-mark { width: 9px !important; height: 3px; background: var(--blaze); }
+.trace-legend [hidden] { display: none; }
 .trace-legend .find { margin-left: auto; gap: 4px; color: var(--muted); }
 .trace-legend .find > span { margin-right: 4px; font-variant-numeric: tabular-nums; }
 .find-btn {
@@ -383,6 +414,23 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .ev.user .time { padding-top: 13px; }
 .ev .body { min-width: 0; padding: 4px 0 4px 8px; }
 .ev.user .body { padding: 10px 0 6px 8px; }
+.mark-btn {
+  position: absolute; right: 2px; top: 5px; display: grid; place-items: center; width: 20px; height: 20px; padding: 0;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--faint); cursor: pointer; opacity: 0; transition: opacity .1s;
+}
+.ev.user .mark-btn { top: 13px; }
+.mark-btn svg { width: 13px; height: 13px; }
+.ev:hover .mark-btn, .mark-btn:focus-visible, .mark-btn[aria-pressed="true"] { opacity: 1; }
+.mark-btn:hover { color: var(--blaze); background: var(--hover); }
+.mark-btn[aria-pressed="true"] { color: var(--blaze); }
+.mark-btn[aria-pressed="true"] svg { fill: var(--blaze); }
+.ev.marked .rail::after { border-color: var(--blaze); box-shadow: 0 0 0 2px var(--blaze-fill); }
+.step-note { display: flex; align-items: flex-start; gap: 7px; margin: 4px 0 6px; }
+.step-note > svg { flex: none; margin-top: 8px; width: 12px; height: 12px; color: var(--blaze); fill: var(--blaze); }
+.step-note textarea { padding: 5px 9px; font-size: 12.5px; }
+.step-note .text { padding: 4px 0; color: var(--ink); font-size: 12.5px; }
+.step-note .k { padding-top: 4px; color: var(--blaze-ink); font-size: 12px; }
+@media (hover: none) { .mark-btn { opacity: .55; } }
 
 .prompt {
   position: relative; padding: 11px 14px; border-radius: var(--r-lg); background: var(--raised); border: 1px solid var(--line);
@@ -531,6 +579,8 @@ details.tool svg.ic { color: var(--faint); }
 .hrow .snip .k { margin-right: 7px; color: var(--faint); font-size: 11.5px; font-weight: 600; }
 .hrow .snip mark { padding: 0 1px; border-radius: 3px; background: var(--blaze-fill); color: var(--blaze-ink); }
 .hrow .where .sep::before { content: "·"; margin: 0 6px; }
+.mrow { grid-template-columns: 12px minmax(0, 1fr) auto; }
+.mrow > svg { grid-row: 1 / 4; width: 12px; height: 12px; color: var(--blaze); }
 .deep-search {
   display: flex; align-items: center; gap: 8px; width: calc(100% - 16px); margin: 6px 8px; padding: 8px 10px;
   border: 1px dashed var(--line); border-radius: var(--r); background: transparent; color: var(--muted); font-size: 12.5px; text-align: left; cursor: pointer;
@@ -565,6 +615,7 @@ details.tool svg.ic { color: var(--faint); }
   .actions { flex-wrap: wrap; }
   .exported-on { height: auto; }
   .trace-wrap { padding: 0 16px 12px; }
+  .s-notes { padding: 0 16px; }
   .trace-legend { display: none; }
   .home-inner { padding: 64px 18px 48px; }
   .home h1 { font-size: 24px; }
