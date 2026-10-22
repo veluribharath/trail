@@ -1,0 +1,2 @@
+{"cwd": "/work/usage", "sessionId": "u1", "isSidechain": true, "type": "user", "timestamp": "2026-10-20T10:00:04Z", "message": {"role": "user", "content": "Look it up"}}
+{"cwd": "/work/usage", "sessionId": "u1", "isSidechain": true, "type": "assistant", "timestamp": "2026-10-20T10:00:05Z", "message": {"id": "msg_sub", "role": "assistant", "model": "claude-haiku-4-5-20251001", "content": [{"type": "text", "text": "Found it."}], "usage": {"input_tokens": 100, "output_tokens": 50, "server_tool_use": {"web_search_requests": 2}}}}

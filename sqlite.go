@@ -53,8 +53,9 @@ type sqliteTable struct {
 // sqliteRow is one decoded record. Values are nil, int64, float64, string or
 // []byte.
 type sqliteRow struct {
-	t    *sqliteTable
-	vals []any
+	t     *sqliteTable
+	rowid int64
+	vals  []any
 }
 
 var errSQLiteCorrupt = errors.New("sqlite: malformed database (it may have changed while being read)")
@@ -96,6 +97,67 @@ func openSQLite(path string) (db *sqliteDB, err error) {
 }
 
 func (db *sqliteDB) Close() error { return db.f.Close() }
+
+// sqliteSnapshots hands out one open, consistent view of a database at a
+// time. A new view is opened when the database or its WAL changes; the old
+// one is closed once nothing is reading it.
+type sqliteSnapshots struct {
+	path string
+
+	mu  sync.Mutex
+	cur *sqliteSnap
+}
+
+type sqliteSnap struct {
+	db    *sqliteDB
+	key   string
+	refs  int
+	stale bool
+}
+
+// sqliteStatKey changes whenever the database or its WAL does.
+func sqliteStatKey(path string) string {
+	key := ""
+	for _, f := range []string{path, path + "-wal"} {
+		if fi, err := os.Stat(f); err == nil {
+			key += fmt.Sprintf("%d@%d;", fi.Size(), fi.ModTime().UnixNano())
+		} else {
+			key += "-;"
+		}
+	}
+	return key
+}
+
+// acquire returns the current view, opening a new one if the database
+// changed. Call the returned func when done reading.
+func (s *sqliteSnapshots) acquire() (*sqliteDB, func(), error) {
+	key := sqliteStatKey(s.path)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.cur == nil || s.cur.key != key {
+		db, err := openSQLite(s.path)
+		if err != nil {
+			return nil, nil, err
+		}
+		if old := s.cur; old != nil {
+			old.stale = true
+			if old.refs == 0 {
+				old.db.Close()
+			}
+		}
+		s.cur = &sqliteSnap{db: db, key: key}
+	}
+	c := s.cur
+	c.refs++
+	return c.db, func() {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		c.refs--
+		if c.stale && c.refs == 0 {
+			c.db.Close()
+		}
+	}, nil
+}
 
 // readWAL indexes the frames of the write-ahead log up to its last valid
 // commit. Frames after that belong to a transaction still being written, or
@@ -640,7 +702,7 @@ func (t *sqliteTable) row(rowid int64, payload []byte) sqliteRow {
 	if t.rowid >= 0 && t.rowid < len(vals) && vals[t.rowid] == nil {
 		vals[t.rowid] = rowid
 	}
-	return sqliteRow{t: t, vals: vals}
+	return sqliteRow{t: t, rowid: rowid, vals: vals}
 }
 
 func (r sqliteRow) get(col string) any {
@@ -689,6 +751,9 @@ func (r sqliteRow) Float(col string) float64 {
 }
 
 func (r sqliteRow) Null(col string) bool { return r.get(col) == nil }
+
+// Rowid is the row's key in its table, for reading it again with Get.
+func (r sqliteRow) Rowid() int64 { return r.rowid }
 
 // sqliteRecord decodes the record format: a header of serial types, then the
 // values. It panics with errSQLiteCorrupt on a malformed record; callers
