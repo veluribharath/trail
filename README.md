@@ -12,7 +12,14 @@ It’s a single static Go binary with an embedded browser UI (fonts included, no
 
 ## Install
 
-Download the archive for your machine from [Releases](https://github.com/veluribharath/trail/releases/latest), unpack it, and run `./trail`. Builds are published for macOS (Apple Silicon and Intel) and Linux (x86_64 and ARM64).
+With [Homebrew](https://brew.sh) on macOS:
+
+```
+brew install veluribharath/tap/trail
+trail -open
+```
+
+Or download the archive for your machine from [Releases](https://github.com/veluribharath/trail/releases/latest), unpack it, and run `./trail`. Builds are published for macOS (Apple Silicon and Intel) and Linux (x86_64 and ARM64).
 
 ```
 tar -xzf trail_*_darwin_arm64.tar.gz
