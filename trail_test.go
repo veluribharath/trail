@@ -669,6 +669,17 @@ func TestSourceState(t *testing.T) {
 	}
 }
 
+func TestSourceStatePartial(t *testing.T) {
+	dir := t.TempDir()
+	copyTree(t, "testdata/kiro/home", dir)
+	data := t.TempDir()
+	os.WriteFile(filepath.Join(data, "data.sqlite3"), []byte("not a database"), 0o600)
+	st := NewIndex(&kiroProvider{dir: dir, dataDir: data}).Scan(0)[0]
+	if st.State != "found" || st.Sessions == 0 || st.Error == "" {
+		t.Errorf("sessions read despite a bad database are found, with the error kept: %+v", st)
+	}
+}
+
 func TestSourceStateCached(t *testing.T) {
 	broken := t.TempDir()
 	os.WriteFile(filepath.Join(broken, "tmp"), []byte("not a folder"), 0o600)

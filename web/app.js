@@ -568,7 +568,7 @@ function renderHome() {
   for (const p of d.providers) {
     const paths = p.checked || [p.root];
     const state = { found: plural(p.sessions, "session"), empty: "No sessions yet", unreadable: "Can’t read it" }[p.state] || "Not on this machine";
-    const why = p.state === "found" ? "" : [p.state === "unreadable" ? (p.error || "").replace(/\.?$/, ".") : "", p.override ? `Set ${p.override} to look elsewhere.` : ""].filter(Boolean).join(" ");
+    const why = [p.error ? p.error.replace(/\.?$/, ".") : "", p.state !== "found" && p.override ? `Set ${p.override} to look elsewhere.` : ""].filter(Boolean).join(" ");
     src.append(h(`<div class="src ${esc(p.state || "")}"><span class="pmark ${esc(p.name)}"></span><span>${esc(PROVIDERS[p.name] || p.name)}</span>
       <span class="path" title="${esc(paths.join("\n"))}">${esc(paths.map(tildify).join(", "))}</span>
       <span class="state">${state}</span>${why ? `<span class="why">${esc(why)}</span>` : ""}</div>`));

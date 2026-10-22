@@ -57,8 +57,8 @@ var providerOverride = map[string]string{
 	"kiro":     "-kiro-dir and -kiro-data-dir",
 }
 
-// sourceState says why a provider shows no sessions: none of its paths
-// exist, one can't be read, or they exist and hold nothing trail can read.
+// sourceState says why a provider shows no sessions: one of its paths can't
+// be read, none of them exist, or they exist and hold nothing trail can read.
 func (st *ProviderStatus) sourceState() {
 	exists := false
 	for _, path := range st.Checked {
@@ -80,11 +80,13 @@ func (st *ProviderStatus) sourceState() {
 			st.Error = err.Error()
 		}
 	}
+	// Sessions found despite an error (say, Kiro's files but not its
+	// database) still count as found; Error says what was missed.
 	switch {
-	case st.Error != "":
-		st.State = "unreadable"
 	case st.Sessions > 0:
 		st.State = "found"
+	case st.Error != "":
+		st.State = "unreadable"
 	case !exists:
 		st.State = "missing"
 	default:

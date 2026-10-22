@@ -294,7 +294,7 @@ func printSources(w io.Writer, status []ProviderStatus, hints bool) {
 			state = "not found"
 		}
 		fmt.Fprintf(w, "  %-8s %-14s %s\n", s.Name, state, strings.Join(s.Checked, ", "))
-		if s.State == "unreadable" {
+		if s.Error != "" {
 			fmt.Fprintf(w, "  %-8s %-14s %s\n", "", "", s.Error)
 		}
 		if hints && s.State != "found" && s.Override != "" {
