@@ -51,6 +51,7 @@ func main() {
 	embedModel := flag.String("embed-model", "nomic-embed-text", "embedding model for -semantic")
 	forget := flag.Bool("forget", false, "delete the vectors -semantic cached and exit")
 	showPrices := flag.Bool("prices", false, "print the token prices used for API-equivalent costs and exit")
+	stats := flag.String("stats", "", "print activity for the last N days (or all) and exit")
 	export := flag.String("export", "", "write one session (id, provider:id, or id prefix) as a single offline HTML file and exit")
 	out := flag.String("o", "", "file for -export to write; without it the page goes to standard output")
 	retro := flag.String("retro", "", "print suggested CLAUDE.md or AGENTS.md rules from a project's sessions (a folder, or . for this one) and exit")
@@ -124,6 +125,18 @@ func main() {
 			}
 		}
 		printSearch(idx, srch, sem, *search)
+		return
+	}
+	if *stats != "" {
+		if *stats != "all" {
+			if n, err := strconv.Atoi(*stats); err != nil || n <= 0 {
+				fmt.Fprintln(os.Stderr, "trail: -stats takes a number of days, or all")
+				os.Exit(2)
+			}
+		}
+		srch.Sync()
+		srv := &Server{index: idx, search: srch, home: homeDir()}
+		printStats(srv.stats(*stats, "", ""), *stats, homeDir())
 		return
 	}
 	srch.Kick()
