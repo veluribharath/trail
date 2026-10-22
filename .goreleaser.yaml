@@ -30,6 +30,29 @@ changelog:
       - "^docs:"
       - "^test:"
 
+homebrew_casks:
+  - name: trail
+    binaries: [trail]
+    homepage: https://veluribharath.github.io/trail/
+    description: Read-only browser for coding-agent sessions
+    license: MIT
+    repository:
+      owner: veluribharath
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    # Releases still publish if the tap token secret isn't set.
+    skip_upload: '{{ if eq .Env.HOMEBREW_TAP_TOKEN "" }}true{{ end }}'
+    commit_msg_template: "trail {{ .Tag }}"
+    hooks:
+      post:
+        # The binary isn't signed, so clear the quarantine flag macOS adds.
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/trail"]
+          end
+
 release:
   footer: |
-    Unpack the archive for your machine and run `./trail`. On macOS, run `xattr -d com.apple.quarantine ./trail` first because the binary isn't signed.
+    On macOS: `brew install veluribharath/tap/trail`.
+
+    Or unpack the archive for your machine and run `./trail`. On macOS, run `xattr -d com.apple.quarantine ./trail` first because the binary isn't signed.

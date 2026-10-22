@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -202,7 +203,7 @@ func TestRepoRootWorktree(t *testing.T) {
 
 func TestServerAPI(t *testing.T) {
 	idx := NewIndex(&claudeProvider{dir: "testdata/claude"}, &codexProvider{dir: "testdata/codex"})
-	srv := httptest.NewServer((&Server{index: idx, home: "/work"}).Handler())
+	srv := httptest.NewServer((&Server{index: idx, search: NewSearch(idx), home: "/work"}).Handler())
 	defer srv.Close()
 
 	var list struct {
@@ -243,9 +244,166 @@ func TestServerAPI(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Errorf("cross-site API read should be refused, got %d", resp.StatusCode)
 	}
+	var found SearchResult
+	for deadline := time.Now().Add(5 * time.Second); ; {
+		getJSON(t, srv.URL+"/api/search?q=cart+cent", &found)
+		if !found.Building || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(found.Sessions) != 1 || found.Sessions[0].Key != "claude:c1" || found.Total != 5 {
+		t.Errorf("search: %+v", found)
+	}
+
 	resp, _ = http.Get(srv.URL + "/")
 	if resp.StatusCode != 200 {
 		t.Errorf("index page: %d", resp.StatusCode)
+	}
+}
+
+func TestSearch(t *testing.T) {
+	idx := NewIndex(&claudeProvider{dir: "testdata/claude"}, &codexProvider{dir: "testdata/codex"})
+	idx.Scan(0)
+	s := NewSearch(idx)
+	s.Sync()
+
+	keys := func(q string) []string {
+		var out []string
+		for _, sh := range s.Run(ParseQuery(q), "", 30).Sessions {
+			out = append(out, sh.Key)
+		}
+		return out
+	}
+	cases := []struct {
+		q    string
+		want string
+	}{
+		{"cart cent ", "claude:c1"},       // words in one prompt
+		{"Cart CENT ", "claude:c1"},       // case doesn't matter
+		{"checkou", "claude:c2"},          // last word matches as a prefix while typing
+		{"math round ", "claude:c1"},      // math.Round in an Edit's input
+		{`"off by a cent" `, "claude:c1"}, // phrase
+		{`"off by a dollar" `, ""},        // phrase words all present? no: dollar isn't
+		{`"cent off" `, ""},               // words present, phrase isn't
+		{"in:output fail ", "claude:c1"},  // a failed step's output
+		{"fail ", "claude:c1"},            // failed output is searched by default
+		{"in:prompt fail ", ""},
+		{"look ", ""}, // thinking only with in:thinking
+		{"in:thinking look ", "claude:c1"},
+		{"tool:bash in:output fail ", "claude:c1"},
+		{"tool:edit in:output fail ", ""},
+		{"file:cart.go round ", "claude:c1"},
+		{"file:readme.md round ", ""},
+		{"agent:codex cart ", ""},
+		{"zzznothing ", ""},
+		{"in:prompt ", ""}, // filters alone match nothing
+	}
+	for _, c := range cases {
+		got := keys(c.q)
+		if (c.want == "" && len(got) != 0) || (c.want != "" && (len(got) == 0 || got[0] != c.want)) {
+			t.Errorf("%q: got %v, want %q", c.q, got, c.want)
+		}
+	}
+
+	res := s.Run(ParseQuery("rounding "), "claude:c1", 30)
+	if len(res.Sessions) != 1 || res.Indexed != res.Total || res.Building {
+		t.Fatalf("one session: %+v", res)
+	}
+	h := res.Sessions[0].Hits[0]
+	var marked []string
+	for _, seg := range h.Snippet {
+		if seg.Hit {
+			marked = append(marked, seg.Text)
+		}
+	}
+	if len(marked) == 0 || !strings.EqualFold(marked[0], "rounding") {
+		t.Errorf("snippet should mark the match: %+v", h)
+	}
+
+	// A session that changes on disk is re-read; one that goes away is dropped.
+	dir := t.TempDir()
+	proj := filepath.Join(dir, "projects", "-tmp")
+	os.MkdirAll(proj, 0o755)
+	line := `{"cwd":"/tmp","sessionId":"x1","type":"user","timestamp":"2026-10-01T10:00:00Z","message":{"role":"user","content":"%s"}}` + "\n"
+	file := filepath.Join(proj, "x1.jsonl")
+	os.WriteFile(file, []byte(fmt.Sprintf(line, "teach the parser about zebras")), 0o644)
+	idx2 := NewIndex(&claudeProvider{dir: dir})
+	s2 := NewSearch(idx2)
+	idx2.Scan(0)
+	s2.Sync()
+	if n := len(s2.Run(ParseQuery("zebras "), "", 10).Sessions); n != 1 {
+		t.Fatalf("zebras: %d", n)
+	}
+	os.WriteFile(file, []byte(fmt.Sprintf(line, "teach the parser about giraffes, not the other animal")), 0o644)
+	os.Chtimes(file, time.Now().Add(time.Minute), time.Now().Add(time.Minute))
+	idx2.Scan(0)
+	s2.Sync()
+	if n := len(s2.Run(ParseQuery("zebras "), "", 10).Sessions); n != 0 {
+		t.Errorf("stale term still matches after rewrite")
+	}
+	if n := len(s2.Run(ParseQuery("giraffes "), "", 10).Sessions); n != 1 {
+		t.Errorf("new term should match after rewrite")
+	}
+	os.Remove(file)
+	idx2.Scan(0)
+	s2.Sync()
+	if n := len(s2.Run(ParseQuery("giraffes "), "", 10).Sessions); n != 0 || s2.docs != 0 || s2.totalLen != 0 {
+		t.Errorf("removed session should leave nothing: %d docs=%d", n, s2.docs)
+	}
+}
+
+// A step's words can be split across its fields, and a finished word is
+// never crowded out of the prefix expansion by longer, commoner words.
+func TestSearchStepAndPrefix(t *testing.T) {
+	dir := t.TempDir()
+	proj := filepath.Join(dir, "projects", "-tmp")
+	os.MkdirAll(proj, 0o755)
+	var many []string
+	for i := range maxPrefixTerms + 10 {
+		many = append(many, fmt.Sprintf("zeb%c%c", 'a'+i/26, 'a'+i%26))
+	}
+	head := `{"cwd":"/tmp","sessionId":"x2","timestamp":"2026-10-01T10:00:00Z",`
+	lines := []string{
+		head + `"type":"user","message":{"role":"user","content":"zeb lonely"}}`,
+		head + `"type":"user","message":{"role":"user","content":"` + strings.Join(many, " ") + `"}}`,
+		head + `"type":"user","message":{"role":"user","content":"` + strings.Join(many, " ") + `"}}`,
+		head + `"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"npm install"}}]}}`,
+		head + `"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"permission denied EACCES","is_error":true}]}}`,
+	}
+	os.WriteFile(filepath.Join(proj, "x2.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	idx := NewIndex(&claudeProvider{dir: dir})
+	idx.Scan(0)
+	s := NewSearch(idx)
+	s.Sync()
+
+	events := func(q string) []int {
+		r := s.Run(ParseQuery(q), "", 10)
+		if len(r.Sessions) == 0 {
+			return nil
+		}
+		return r.Sessions[0].Events
+	}
+	if ev := events("npm eacces "); len(ev) != 1 {
+		t.Errorf("command and error output of one step should match together, got %v", ev)
+	}
+	if ev := events(`"npm install" eacces `); len(ev) != 1 {
+		t.Errorf("phrase in the command, word in the output: %v", ev)
+	}
+	if ev := events("in:tool npm eacces "); ev != nil {
+		t.Errorf("in:tool should leave the output out: %v", ev)
+	}
+	if ev := events("zeb"); !slices.Contains(ev, 0) {
+		t.Errorf("exact word typed as a prefix should still match its step, got %v", ev)
+	}
+}
+
+func TestTokenize(t *testing.T) {
+	var got []string
+	tokenize("handleSession HTTPServer snake_case_name x 3f9a1c0b7e2d4f6a8b9c", true, func(s string) { got = append(got, s) })
+	want := "handlesession handle session httpserver http server snake_case_name snake case name x"
+	if strings.Join(got, " ") != want {
+		t.Errorf("tokens:\n got %s\nwant %s", strings.Join(got, " "), want)
 	}
 }
 
