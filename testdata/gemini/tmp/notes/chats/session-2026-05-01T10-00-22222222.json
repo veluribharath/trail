@@ -1,0 +1,25 @@
+{
+  "sessionId": "22222222-0000-4000-8000-000000000002",
+  "projectHash": "def",
+  "startTime": "2026-05-01T10:00:00.000Z",
+  "lastUpdated": "2026-05-01T10:05:00.000Z",
+  "messages": [
+    {
+      "id": "a",
+      "timestamp": "2026-05-01T10:00:00.000Z",
+      "type": "user",
+      "content": [
+        {
+          "text": "Summarise my notes"
+        }
+      ]
+    },
+    {
+      "id": "b",
+      "timestamp": "2026-05-01T10:01:00.000Z",
+      "type": "gemini",
+      "content": "Here is a summary.",
+      "model": "gemini-2.5-pro"
+    }
+  ]
+}

@@ -36,6 +36,7 @@
   --claude: #7c5cd6;
   --codex: #0b8a8f;
   --opencode: #c0407a;
+  --gemini: #6f8a12;
   --find: #2563c9;
   --hover: rgba(15, 23, 41, .05);
   --select: rgba(178, 111, 14, .11);
@@ -78,6 +79,7 @@
     --claude: #a990fa;
     --codex: #3fc8cc;
     --opencode: #f07fb0;
+    --gemini: #b5d655;
     --find: #79a8ff;
     --hover: rgba(231, 235, 243, .045);
     --select: rgba(242, 181, 68, .10);
@@ -164,6 +166,7 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .pmark.claude { background: var(--claude); }
 .pmark.codex { background: var(--codex); }
 .pmark.opencode { background: var(--opencode); }
+.pmark.gemini { background: var(--gemini); }
 
 .tree { flex: 1; overflow: auto; padding: 8px 8px 16px; scrollbar-width: thin; }
 .group-label { padding: 14px 10px 4px; color: var(--faint); font-size: 12px; font-weight: 500; }

@@ -4,7 +4,7 @@ See what your coding agents did, folder by folder.
 
 ![trail showing a Claude Code session: the trace strip under the header, the transcript as a trail of steps on the left, and the diffs it made on the right](docs/screenshot.png)
 
-trail finds the sessions that Claude Code, Codex and OpenCode leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first.
+trail finds the sessions that Claude Code, Codex, OpenCode and Gemini CLI leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first.
 
 Each session opens with a trace: one tick per step, prompts tall, edits amber, failures red. Drag across it to move through the transcript. Press ⌘K (Ctrl+K) to search: it matches session names, and everything said and run inside every transcript. Pick a match to open the session at that step, with every other matching step marked on the trace; `n` and `Shift+N` step through them. `/` filters the sidebar by name, and `j`/`k` step between sessions.
 
@@ -58,6 +58,7 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | `-claude-dir` | `$CLAUDE_CONFIG_DIR` or `~/.claude` |
 | `-codex-dir` | `$CODEX_HOME` or `~/.codex` |
 | `-opencode-dir` | `$XDG_DATA_HOME/opencode` or `~/.local/share/opencode` |
+| `-gemini-dir` | `$GEMINI_CLI_HOME/.gemini` or `~/.gemini` |
 | `-semantic` | off; see [Related sessions](#related-sessions-opt-in) |
 | `-embed-url` | `http://127.0.0.1:11434` (Ollama) |
 | `-embed-model` | `nomic-embed-text` |
@@ -69,10 +70,11 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | Claude Code | `~/.claude/projects/<folder>/<id>.jsonl` | `Edit`, `MultiEdit`, `Write` |
 | Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (current and legacy formats) | `apply_patch`, direct or through the shell tool |
 | OpenCode | `~/.local/share/opencode/opencode.db` (OpenCode 1.2 and later) | `edit`, `write`, `apply_patch`; subagent sessions are shown inside their parent |
+| Gemini CLI | `~/.gemini/tmp/<project>/chats/session-*.jsonl` (and older `.json` sessions) | `replace`, `write_file` (a real before/after, since Gemini CLI records the old file); subagent runs aren't shown yet |
 
 OpenCode keeps every session in one SQLite database. trail reads it with a small built-in reader instead of a SQLite library: it opens the database and its `-wal` file read-only, takes no locks, and creates no files next to them, so it can't get in the way of a running OpenCode. A session that is being written shows up as of the last committed step.
 
-A session the agent wrote to in the last 10 minutes opens live: new steps appear as the agent works, marked Live in the header. Following a session can't interrupt it. Both agents only append whole lines to the session file, so trail checks the file's size about once a second and, when it grows, reads the complete lines and closes the file again. It never holds the file open or touches the agents' lock files. OpenCode sessions follow the same way, by checking the database about once a second; they update as each step is committed.
+A session the agent wrote to in the last 10 minutes opens live: new steps appear as the agent works, marked Live in the header. Following a session can't interrupt it. Claude Code, Codex and Gemini CLI append whole lines to the session file, so trail checks the file's size about once a second and, when it grows, reads the complete lines and closes the file again. It never holds the file open or touches the agents' lock files. OpenCode sessions follow the same way, by checking the database about once a second; they update as each step is committed.
 
 Sessions are filed under their git repository. A session that ran in a linked worktree is filed under the main repository and labelled with the worktree. Folders that aren't repositories are filed as themselves.
 
@@ -127,6 +129,7 @@ model.go     Session, Transcript, Event, FileChange
 claude.go    Claude Code adapter
 codex.go     Codex adapter and apply_patch parser
 opencode.go  OpenCode adapter
+gemini.go    Gemini CLI adapter
 sqlite.go    read-only SQLite reader (tables, indexes, WAL)
 index.go     discovery, mtime cache, repo-root grouping
 search.go    full-text index and queries
@@ -141,7 +144,7 @@ Adding an agent means implementing `Provider` (four methods) and registering it 
 
 ## Not yet
 
-- Gemini CLI, Kiro, pi
+- Kiro, pi
 - Renaming sessions from trail (names are read from the agents, never written)
 
 ## Contributing
