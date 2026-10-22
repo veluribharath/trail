@@ -1230,6 +1230,8 @@ async function init() {
     if ($("#app").classList.contains("drawer") && !e.target.closest("#side, #menu")) closeDrawer();
   });
   document.addEventListener("keydown", (e) => {
+    // The export dialog is modal: j/k behind it would change which session it exports.
+    if ($(".dlg[open]")) return;
     const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName);
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("#palette").hidden ? openPalette() : closePalette(); return; }
     if (e.key === "Escape") { closePalette(); closeDrawer(); return; }
