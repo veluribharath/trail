@@ -158,7 +158,55 @@ type cdpMessage struct {
 	} `json:"error,omitempty"`
 }
 
+// startChrome launches Chrome and attaches to its page. A Chrome that
+// doesn't answer its first command is killed and started again once:
+// on a busy CI runner it occasionally comes up deaf on the pipe.
 func startChrome(t *testing.T, bin string) *browser {
+	t.Helper()
+	for attempt := 1; ; attempt++ {
+		b, kill := launchChrome(t, bin)
+		var targets struct {
+			TargetInfos []struct {
+				TargetID string `json:"targetId"`
+				Type     string `json:"type"`
+			} `json:"targetInfos"`
+		}
+		select {
+		case m := <-b.send("Target.getTargets", nil, ""):
+			if m.Error != nil {
+				t.Fatalf("Target.getTargets: %s", m.Error.Message)
+			}
+			b.decode(m.Result, &targets)
+		case <-time.After(15 * time.Second):
+			if attempt == 2 {
+				t.Fatal("Target.getTargets: chrome didn't answer, twice")
+			}
+			t.Log("chrome didn't answer; starting it again")
+			kill()
+			continue
+		}
+		for _, ti := range targets.TargetInfos {
+			if ti.Type == "page" {
+				var att struct {
+					SessionID string `json:"sessionId"`
+				}
+				b.decode(b.callIn("", "Target.attachToTarget", map[string]any{"targetId": ti.TargetID, "flatten": true}), &att)
+				b.session = att.SessionID
+				break
+			}
+		}
+		if b.session == "" {
+			t.Fatal("chrome opened no page")
+		}
+		b.call("Runtime.enable", nil)
+		b.call("Log.enable", nil)
+		b.call("Page.enable", nil)
+		return b
+	}
+}
+
+// launchChrome starts Chrome on a debugging pipe. kill stops it at once.
+func launchChrome(t *testing.T, bin string) (b *browser, kill func()) {
 	t.Helper()
 	// Chrome reads commands from fd 3 and writes to fd 4, each message ending
 	// in a NUL byte.
@@ -188,7 +236,7 @@ func startChrome(t *testing.T, bin string) *browser {
 	}
 	cmdR.Close()
 	outW.Close()
-	b := &browser{t: t, in: cmdW, waiting: map[int]chan cdpMessage{}}
+	b = &browser{t: t, in: cmdW, waiting: map[int]chan cdpMessage{}}
 	done := make(chan struct{})
 	t.Cleanup(func() {
 		b.send("Browser.close", nil, "")
@@ -233,31 +281,7 @@ func startChrome(t *testing.T, bin string) *browser {
 			b.mu.Unlock()
 		}
 	}()
-
-	var targets struct {
-		TargetInfos []struct {
-			TargetID string `json:"targetId"`
-			Type     string `json:"type"`
-		} `json:"targetInfos"`
-	}
-	b.decode(b.callIn("", "Target.getTargets", nil), &targets)
-	for _, ti := range targets.TargetInfos {
-		if ti.Type == "page" {
-			var att struct {
-				SessionID string `json:"sessionId"`
-			}
-			b.decode(b.callIn("", "Target.attachToTarget", map[string]any{"targetId": ti.TargetID, "flatten": true}), &att)
-			b.session = att.SessionID
-			break
-		}
-	}
-	if b.session == "" {
-		t.Fatal("chrome opened no page")
-	}
-	b.call("Runtime.enable", nil)
-	b.call("Log.enable", nil)
-	b.call("Page.enable", nil)
-	return b
+	return b, cancel
 }
 
 // event records anything that means the page broke. Called with mu held.
