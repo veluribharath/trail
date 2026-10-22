@@ -94,7 +94,7 @@
         <article class="card">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h7v14H4zM13 5h7v14h-7zM8 9h-.01M17 10l-2 2 2 2"/></svg>
           <h3>Transcript beside its diffs</h3>
-          <p>Click an edit in the transcript to jump to its diff. Click a diff to jump back to the step that made it. Each diff is the exact before and after the agent sent.</p>
+          <p>Click an edit in the transcript to jump to its diff. Click a diff to jump back to the step that made it. Each diff is the exact before and after the agent sent. Filter to just the conversation, or only edits and failures. Bookmark the step that matters and leave yourself a note.</p>
         </article>
         <article class="card">
           <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="12" r="2"/><path d="M6 8v8M8 6h4a4 4 0 0 1 4 4v0"/></svg>
@@ -102,9 +102,9 @@
           <p>The Commits tab lists what reached git while the session ran, from 10 minutes before to 2 hours after, with the commits that touch the agent's files first.</p>
         </article>
         <article class="card">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12h3l2-6 4 12 2-6h5"/></svg>
-          <h3>Read a session at a glance</h3>
-          <p>Switch between every step, just the conversation, or only edits and failures. Bookmark a session or the one step that matters, and leave yourself a note; ⌘K lists your bookmarks first.</p>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 20h17M6.5 16.5v-4M12 16.5V6.5M17.5 16.5v-7"/></svg>
+          <h3>See the patterns</h3>
+          <p>Stats show sessions per project over time, the files agents edit most, and how often each tool call fails, across every agent. Narrow them to one project, or print them with <code>trail -stats 30</code>.</p>
         </article>
         <article class="card">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19.5h14"/></svg>
@@ -196,7 +196,8 @@ trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</but
           <pre><code>./trail          <span class="c"># http://127.0.0.1:7878</span>
 ./trail -open    <span class="c"># and open the browser</span>
 ./trail -list    <span class="c"># print sessions by folder and exit</span>
-./trail -export c1 -o session.html  <span class="c"># one session as an offline page</span></code></pre>
+./trail -export c1 -o session.html  <span class="c"># one session as an offline page</span>
+./trail -stats 30  <span class="c"># the last 30 days in numbers</span></code></pre>
           <p class="note">On a remote dev box, run <code>./trail -host 0.0.0.0</code> on a network you trust, or tunnel the port over SSH.</p>
         </div>
         <div class="table-scroll">
@@ -211,6 +212,7 @@ trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</but
               <tr><td><code>-gemini-dir</code></td><td><code>$GEMINI_CLI_HOME/.gemini</code> or <code>~/.gemini</code></td></tr>
               <tr><td><code>-kiro-dir</code></td><td><code>~/.kiro</code></td></tr>
               <tr><td><code>-kiro-data-dir</code></td><td><code>~/.local/share/kiro-cli</code>; <code>~/Library/Application Support/kiro-cli</code> on macOS</td></tr>
+              <tr><td><code>-stats</code></td><td>off; a number of days, or <code>all</code></td></tr>
               <tr><td><code>-export</code>, <code>-o</code></td><td>off; see <a href="https://github.com/veluribharath/trail#export-a-session">Export a session</a></td></tr>
             </tbody>
           </table>

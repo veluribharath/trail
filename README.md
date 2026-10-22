@@ -4,7 +4,7 @@ See what your coding agents did, folder by folder.
 
 ![trail showing a Claude Code session: the trace strip under the header, the transcript as a trail of steps on the left, and the diffs it made on the right](docs/screenshot.png)
 
-trail finds the sessions that Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first. Any session can be [exported](#export-a-session) as one HTML file to share.
+trail finds the sessions that Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first. Any session can be [exported](#export-a-session) as one HTML file to share, and [Stats](#stats) show how your agents work across every project.
 
 Each session opens with a trace: one tick per step, prompts tall, edits amber, failures red. Drag across it to move through the transcript. Press ⌘K (Ctrl+K) to search: it matches session names, and everything said and run inside every transcript. Pick a match to open the session at that step, with every other matching step marked on the trace; `n` and `Shift+N` step through them. `/` filters the sidebar by name, and `j`/`k` step between sessions. [Bookmark](#notes-and-bookmarks) a session or a single step, and leave yourself a note on either.
 
@@ -52,6 +52,7 @@ make build
 ./trail -prices    # print the token prices used for costs, and exit
 ./trail -export c1 -o session.html   # write one session as an offline page, and exit
 ./trail -notes     # print your bookmarks and notes, and exit
+./trail -stats 30   # print the last 30 days in numbers (or -stats all), and exit
 ```
 
 On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop. Transcripts often contain secrets, so only do this on a network you trust (or tunnel the port over SSH instead).
@@ -73,6 +74,7 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | `-export`, `-o` | off; see [Export a session](#export-a-session) |
 | `-no-notes` | off: `-export` includes your notes and bookmarks |
 | `-notes` | print your bookmarks and notes and exit; see [Notes and bookmarks](#notes-and-bookmarks) |
+| `-stats` | off; a number of days, or `all`; see [Stats](#stats) |
 
 ## What it reads
 
@@ -170,6 +172,19 @@ Notes belong to trail, not to the agents. They're kept in one file, `~/Library/A
 
 An export includes the session's notes and bookmarks, read-only. Untick Include my notes and bookmarks in the export dialog, or pass `-no-notes` to `-export`, to leave them out.
 
+## Stats
+
+The chart button at the top of the sidebar (or the link on the home page) opens Stats for the last 7, 30 or 90 days, a year, or all time, across every project or just one. Agents you turn off in the sidebar are left out.
+
+- **Sessions per day, week or month**, stacked by project: your five busiest projects in the range by name, the rest as Other.
+- **API-equivalent cost per day, week or month**, stacked the same way, when sessions recorded token counts. Show tokens switches it, the tiles and the tables to token counts (the same switch as in a session).
+- **Failed tool calls** over the same buckets: the share of tool calls that returned an error.
+- **Most edited files**: edits recorded in transcripts, and how many sessions made them. A session in a linked worktree counts under the main repository's paths.
+- **Failure rate by tool**, for the twelve most used tools. Tool names are each agent's own (Claude Code's `Bash`, Codex's `shell`), so they are listed per agent. Rates from fewer than 20 calls are drawn faded.
+- **Projects** and **Agents** tables with sessions, edits, failure rates and cost. Click a project to narrow everything to it.
+
+Every chart has a Table button for the numbers behind it. A session counts on the day it started, in your local time. Tool calls and edited files come from reading whole transcripts, which trail does in the background for search, so for the first seconds after it starts the page says how many it has read and fills in as it goes. `trail -stats 30` prints the same numbers in the terminal.
+
 ## How diffs and commits are matched
 
 The Edits tab comes straight from the transcript: each change is the before/after text the agent sent to its edit tool, so it is exact for that step. A Claude Code `Write` replaces the whole file, and the transcript doesn't say what was there before, so every line shows as added.
@@ -189,6 +204,7 @@ kiro.go      Kiro CLI adapter (JSONL sessions and data.sqlite3)
 sqlite.go    read-only SQLite reader (tables, indexes, WAL)
 index.go     discovery, mtime cache, repo-root grouping
 search.go    full-text index and queries
+stats.go     sessions, files and failures over time
 semantic.go  opt-in related-session search over a local embedding model
 git.go       commits in the session window
 server.go    JSON API and embedded UI
