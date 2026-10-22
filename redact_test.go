@@ -51,6 +51,9 @@ func TestRedact(t *testing.T) {
 		"Bearer token missing",
 		"func TestRedactKeepsOrdinaryCode(t *testing.T)",
 		"/home/me/projects/MyApp2/src/components/Header.tsx",
+		"PWD=/home/me/app2",
+		"token_file=/run/secrets/api2",
+		"AuthorDate: 2026-10-01T10:00:00",
 	}
 	for _, in := range kept {
 		if out := Redact(in); out != in {

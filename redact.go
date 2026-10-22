@@ -38,7 +38,7 @@ var redactRules = []redactRule{
 	{re: regexp.MustCompile(`\b[a-zA-Z][a-zA-Z0-9+.-]*://[^/\s:@"']+:([^/\s@"']+)@`), group: 1},
 	{re: regexp.MustCompile(`(?i)\b(?:bearer|basic|token)\s+([A-Za-z0-9._~+/=-]{12,})`), group: 1, keep: wordLike},
 	// key = value, key: value, KEY=value, "key": "value" for names that say secret.
-	{re: regexp.MustCompile(`(?i)[A-Za-z0-9_.-]*(?:password|passwd|pwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential|auth)[A-Za-z0-9_-]*["']?\s*(?::=|=|:)\s*["']?([^\s"'` + "`" + `,;(){}\[\]<>]{6,})`), group: 1, keep: wordLike},
+	{re: regexp.MustCompile(`(?i)[A-Za-z0-9_.-]*(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|private[_-]?key|credential|auth)[A-Za-z0-9_-]*["']?\s*(?::=|=|:)\s*["']?([^\s"'` + "`" + `,;(){}\[\]<>]{6,})`), group: 1, keep: wordLike},
 	// A long run that mixes upper case, lower case and digits is almost
 	// always a key. Git hashes are lower case and survive.
 	{re: regexp.MustCompile(`[A-Za-z0-9+=-]{32,}`), keep: notRandom},
@@ -88,6 +88,12 @@ func wordLike(v string) bool {
 	if strings.Trim(v, "0123456789") == "" {
 		return true // a count or a port: max_tokens=4096
 	}
+	if strings.ContainsRune(v, '/') && strings.ContainsAny(v[:1], "/~.") {
+		return true // a path: token_file=/run/secrets/x
+	}
+	if dateLike.MatchString(v) {
+		return true // AuthorDate: 2026-10-01T10:00
+	}
 	for _, c := range v {
 		switch {
 		case unicode.IsDigit(c):
@@ -105,6 +111,8 @@ func wordLike(v string) bool {
 	}
 	return false
 }
+
+var dateLike = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}`)
 
 func notRandom(v string) bool {
 	var lower, upper, digit bool
