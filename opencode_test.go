@@ -84,8 +84,16 @@ func TestOpenCodeParse(t *testing.T) {
 		t.Fatalf("discover should list the two top-level sessions: %v %v", paths, err)
 	}
 	o1 := p.dbPath() + "#ses_o1"
-	if _, ok := p.Stamp(o1); !ok {
+	stamp, ok := p.Stamp(o1)
+	if !ok {
 		t.Fatal("no stamp for o1")
+	}
+	// o1 has a subagent; its stamp must not depend on map order.
+	for i := 0; i < 20; i++ {
+		p.Discover()
+		if again, _ := p.Stamp(o1); again != stamp {
+			t.Fatalf("stamp changed without the session changing:\n%s\n%s", stamp, again)
+		}
 	}
 	tr, err := p.Parse(o1, true)
 	if err != nil {

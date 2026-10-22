@@ -127,8 +127,14 @@ func (p *opencodeProvider) Discover() ([]string, error) {
 		return nil, err
 	}
 	// Fold each subagent's stamp into its top-level session.
-	stamps := map[string]string{}
+	// Sorted, so an unchanged session always gets the same stamp.
+	ids := make([]string, 0, len(own))
 	for id := range own {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	stamps := map[string]string{}
+	for _, id := range ids {
 		top := id
 		for i := 0; i < 16 && parent[top] != ""; i++ {
 			top = parent[top]
@@ -137,7 +143,7 @@ func (p *opencodeProvider) Discover() ([]string, error) {
 		stamps[path] += own[id] + ";"
 	}
 	out := make([]string, 0, len(stamps))
-	for id := range own {
+	for _, id := range ids {
 		if parent[id] == "" {
 			out = append(out, p.dbPath()+"#"+id)
 		}
@@ -302,8 +308,10 @@ func (p *opencodeProvider) addSession(db *sqliteDB, t *Transcript, id string, fu
 				if st.Time.Start > 0 {
 					pts = msTime(st.Time.Start)
 				}
+				// Only a completed call changed the files; a pending or
+				// running one may still fail or be cancelled.
 				var changes []FileChange
-				if st.Status != "error" {
+				if st.Status == "completed" {
 					changes = opencodeChanges(pt.Tool, st.Input, s.Cwd)
 				}
 				idx := -1
