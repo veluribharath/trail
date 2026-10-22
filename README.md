@@ -6,13 +6,20 @@ See what your coding agents did, folder by folder.
 
 trail finds the sessions that Claude Code, Codex and OpenCode leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first.
 
-Each session opens with a trace: one tick per step, prompts tall, edits amber, failures red. Drag across it to move through the transcript. Press ⌘K (Ctrl+K) to jump to any session, `/` to filter the sidebar, and `j`/`k` to step between sessions.
+Each session opens with a trace: one tick per step, prompts tall, edits amber, failures red. Drag across it to move through the transcript. Press ⌘K (Ctrl+K) to search: it matches session names, and everything said and run inside every transcript. Pick a match to open the session at that step, with every other matching step marked on the trace; `n` and `Shift+N` step through them. `/` filters the sidebar by name, and `j`/`k` step between sessions.
 
 It’s a single static Go binary with an embedded browser UI (fonts included, nothing loads from the network). It only reads agent storage, never writes to it.
 
 ## Install
 
-Download the archive for your machine from [Releases](https://github.com/veluribharath/trail/releases/latest), unpack it, and run `./trail`. Builds are published for macOS (Apple Silicon and Intel) and Linux (x86_64 and ARM64).
+With [Homebrew](https://brew.sh) on macOS:
+
+```
+brew install veluribharath/tap/trail
+trail -open
+```
+
+Or download the archive for your machine from [Releases](https://github.com/veluribharath/trail/releases/latest), unpack it, and run `./trail`. Builds are published for macOS (Apple Silicon and Intel) and Linux (x86_64 and ARM64).
 
 ```
 tar -xzf trail_*_darwin_arm64.tar.gz
@@ -39,6 +46,7 @@ make build
 ./trail            # http://127.0.0.1:7878
 ./trail -open      # and open the browser
 ./trail -list      # print sessions by folder and exit
+./trail -search "flaky login"   # print matching sessions and steps, and exit
 ```
 
 On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop. Transcripts often contain secrets, so only do this on a network you trust (or tunnel the port over SSH instead).
@@ -63,6 +71,20 @@ OpenCode keeps every session in one SQLite database. trail reads it with a small
 
 Sessions are filed under their git repository. A session that ran in a linked worktree is filed under the main repository and labelled with the worktree. Folders that aren't repositories are filed as themselves.
 
+## Search
+
+Search covers prompts, replies, tool calls (commands, patterns, paths, edit contents) and the output of steps that failed, which is where error messages are. Output of steps that succeeded (mostly file contents and logs) isn't searched. Every word has to appear in the same step; the last word also matches as a prefix while you type. Identifiers are split, so `session` finds `handleSession` and `name` finds `user_name`.
+
+| Write | To find |
+| --- | --- |
+| `"exact phrase"` | the words in that order |
+| `in:prompt`, `in:reply`, `in:tool`, `in:output`, `in:thinking`, `in:all` | only those parts of a step (thinking is left out unless asked for) |
+| `tool:bash` | only calls to that tool |
+| `file:cart.go` | only steps that edited a matching file |
+| `agent:codex` | only one agent's sessions |
+
+The index lives in memory and is built in the background when trail starts, re-reading only sessions that changed. Nothing is written to disk. On a generated 450 MB set of transcripts it took about 5 seconds to build, used about 160 MB, and answered in about 100 ms.
+
 ## How diffs and commits are matched
 
 The Edits tab comes straight from the transcript: each change is the before/after text the agent sent to its edit tool, so it is exact for that step. A Claude Code `Write` replaces the whole file, and the transcript doesn't say what was there before, so every line shows as added.
@@ -79,6 +101,7 @@ codex.go     Codex adapter and apply_patch parser
 opencode.go  OpenCode adapter
 sqlite.go    read-only SQLite reader (tables, indexes, WAL)
 index.go     discovery, mtime cache, repo-root grouping
+search.go    full-text index and queries
 git.go       commits in the session window
 server.go    JSON API and embedded UI
 web/         index.html, style.css, app.js (no build step)
@@ -90,7 +113,7 @@ Adding an agent means implementing `Provider` (four methods) and registering it 
 
 - Gemini CLI, Kiro, pi
 - Renaming sessions from trail (names are read from the agents, never written)
-- Full-text search across transcripts (the filter covers titles, first prompts, folders and branches)
+- Semantic search (finding a session by meaning rather than words), as an opt-in that uses a local model
 - Live tailing of a running session
 
 ## Contributing

@@ -21,6 +21,8 @@ const state = {
   filter: "all", // all | talk | changes
   commits: null,
   pane: "log",
+  find: null, // { q, key, events, i }: transcript search matches in the open session
+  pendingJump: null, // { event, field } to show once a session opened from search renders
 };
 
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -179,7 +181,8 @@ function renderSidebar() {
     return;
   }
   if (!sessions.length) {
-    tree.append(h(`<div class="empty">Nothing matches “${esc(state.q)}”. Clear the filter or turn a provider back on.</div>`));
+    tree.append(h(`<div class="empty">No session name matches “${esc(state.q)}”. Clear the filter or turn a provider back on.</div>`));
+    tree.append(deepSearchRow());
     return;
   }
   const filtering = state.q.trim() !== "";
@@ -213,6 +216,15 @@ function renderSidebar() {
   const root = buildTree(sessions);
   for (const kid of [...root.kids.values()].sort(byRecent)) tree.append(folder(kid));
   for (const s of root.sessions) tree.append(sessionRow(s));
+  if (filtering) tree.append(deepSearchRow());
+}
+
+// deepSearchRow hands the sidebar filter to the palette, which also searches
+// inside transcripts.
+function deepSearchRow() {
+  const b = h(`<button class="deep-search">${svg("search")}<span>Search transcripts for “${esc(state.q.trim())}”</span></button>`);
+  b.onclick = () => openPalette(state.q.trim());
+  return b;
 }
 
 function sessionRow(s) {
@@ -329,6 +341,7 @@ function renderDiffRows(rows, limit) {
 
 /* ---------------- session ---------------- */
 async function openSession(key) {
+  if (state.find && state.find.key !== key) state.find = null;
   state.current = key;
   state.fileFilter = null;
   state.commits = null;
@@ -357,6 +370,9 @@ async function openSession(key) {
     state.stats = sessionStats(t);
     if (!t.changes.length) state.tab = "commits";
     renderSession();
+    const jump = state.pendingJump;
+    state.pendingJump = null;
+    if (jump) requestAnimationFrame(() => showMatch(jump.event, jump.field));
   } catch (e) {
     console.error(e);
     showError(`The page hit an error while drawing it: ${e.message}`);
@@ -406,7 +422,7 @@ function renderSession() {
       <div class="trace" id="trace" role="slider" tabindex="0" aria-label="Session trace. Drag or use arrow keys to move through the transcript." aria-valuemin="1" aria-valuemax="${t.events.length}" aria-valuenow="1">
         <div class="win"></div><canvas></canvas>
       </div>
-      <div class="trace-legend"><span><i class="lg-prompt"></i>Prompt</span><span><i class="lg-tool"></i>Tool call</span><span><i class="lg-edit"></i>Edit</span><span><i class="lg-err"></i>Failed</span></div>
+      <div class="trace-legend"><span><i class="lg-prompt"></i>Prompt</span><span><i class="lg-tool"></i>Tool call</span><span><i class="lg-edit"></i>Edit</span><span><i class="lg-err"></i>Failed</span><span class="find" id="find" hidden></span></div>
     </div>
     <div class="panes" data-show="${state.pane}">
       <div class="pane-tabs"><div class="seg" role="tablist">
@@ -441,6 +457,7 @@ function renderSession() {
   applyFilter();
   renderChangesPane();
   setupTrace();
+  renderFind();
 }
 
 function setPane(p) {
@@ -573,6 +590,13 @@ const trace = {
       ctx.roundRect ? ctx.roundRect(x, mid - hgt / 2, bw, hgt, bw / 2) : ctx.rect(x, mid - hgt / 2, bw, hgt);
       ctx.fill();
     });
+    const f = activeFind();
+    if (f) {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = col("--find");
+      const mw = Math.max(2, bw);
+      for (const i of f.events) ctx.fillRect(this.xOf(i) - mw / 2, 0, mw, 4);
+    }
   },
   update() {
     if (!this.el || !this.el.isConnected) return;
@@ -655,6 +679,64 @@ function setupTrace() {
     if (to !== null) { ev.preventDefault(); trace.scrollTo(to, true); }
   });
   requestAnimationFrame(() => { trace.draw(); trace.update(); });
+}
+
+/* ---------------- transcript matches ---------------- */
+function activeFind() {
+  const f = state.find;
+  return f && state.transcript && f.key === state.transcript.session.key && f.events.length ? f : null;
+}
+
+function renderFind() {
+  const el = $("#find");
+  if (!el) return;
+  const f = activeFind();
+  el.hidden = !f;
+  if (!f) return;
+  const pos = f.i >= 0 ? `${f.i + 1} of ${f.events.length}` : plural(f.events.length, "step");
+  el.innerHTML = `<i class="lg-find"></i><span>${pos} matching “${esc(f.q.trim())}”</span>
+    <button class="find-btn" data-d="-1" title="Previous match (Shift+N)" aria-label="Previous match">${svg("chev")}</button>
+    <button class="find-btn" data-d="1" title="Next match (N)" aria-label="Next match">${svg("chev")}</button>
+    <button class="find-btn x" title="Clear matches" aria-label="Clear matches"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>`;
+  $$("[data-d]", el).forEach((b) => (b.onclick = () => stepFind(+b.dataset.d)));
+  $(".x", el).onclick = () => { state.find = null; renderFind(); trace.draw(); };
+}
+
+function stepFind(d) {
+  const f = activeFind();
+  if (!f) return;
+  if (f.i < 0) {
+    const now = +($("#trace")?.getAttribute("aria-valuenow") || 1) - 1;
+    f.i = d > 0 ? f.events.findIndex((e) => e >= now) : f.events.findLastIndex((e) => e <= now);
+    if (f.i < 0) f.i = d > 0 ? 0 : f.events.length - 1;
+  } else {
+    f.i = (f.i + d + f.events.length) % f.events.length;
+  }
+  renderFind();
+  showMatch(f.events[f.i]);
+}
+
+// showMatch scrolls to a matching step, opening a folded tool call or
+// thinking block so the match is on screen.
+function showMatch(ev, field) {
+  const row = document.getElementById("ev-" + ev);
+  const d = row && $("details", row);
+  if (d && field !== "prompt" && field !== "reply") d.open = true;
+  focusEvent(ev);
+}
+
+// openMatch opens a session at one step of a transcript search, keeping every
+// matching step marked on its trace.
+function openMatch(sh, hit, q) {
+  state.find = { q, key: sh.key, events: sh.events, i: sh.events.indexOf(hit.event) };
+  if (state.current === sh.key && state.transcript?.session.key === sh.key) {
+    renderFind();
+    trace.draw();
+    showMatch(hit.event, hit.field);
+    return;
+  }
+  state.pendingJump = { event: hit.event, field: hit.field };
+  go(sh.key);
 }
 
 /* ---------------- changes ---------------- */
@@ -800,7 +882,7 @@ async function renderCommits(pane) {
 }
 
 /* ---------------- palette ---------------- */
-const palette = { items: [], sel: 0 };
+const palette = { items: [], sel: 0, hits: null, seq: 0, timer: 0 };
 
 function score(s, q) {
   if (!q) return 1;
@@ -819,38 +901,89 @@ function hilite(text, q) {
   if (i < 0) return esc(text);
   return esc(text.slice(0, i)) + `<mark>${esc(text.slice(i, i + q.length))}</mark>` + esc(text.slice(i + q.length));
 }
+const FIELD = { prompt: "Prompt", reply: "Reply", thinking: "Thinking" };
+const snippetHTML = (segs) => segs.map((g) => (g.m ? `<mark>${esc(g.t)}</mark>` : esc(g.t))).join("");
+
 function renderPalette() {
-  const q = $("#palette-q").value.trim().toLowerCase();
+  const raw = $("#palette-q").value;
+  const q = raw.trim().toLowerCase();
   const list = $("#palette-list");
+  const byKey = new Map(state.data.sessions.map((s) => [s.key, s]));
   palette.items = state.data.sessions
     .map((s) => [score(s, q), s]).filter(([sc]) => sc > 0)
     .sort((a, b) => b[0] - a[0] || (a[1].ended < b[1].ended ? 1 : -1))
-    .slice(0, 40).map(([, s]) => s);
+    .slice(0, q ? 6 : 40).map(([, s]) => ({ s }));
+  const nNamed = palette.items.length;
+  const r = q && palette.hits?.q === raw ? palette.hits.r : null;
+  if (r) for (const sh of r.sessions) if (byKey.has(sh.key) && sh.hits.length) palette.items.push({ s: byKey.get(sh.key), sh });
   palette.sel = Math.min(palette.sel, Math.max(0, palette.items.length - 1));
   list.innerHTML = "";
-  if (!palette.items.length) { list.append(h(`<div class="palette-empty">No session matches “${esc(q)}”.</div>`)); return; }
-  palette.items.forEach((s, i) => {
-    const row = h(`<button class="prow" role="option" aria-selected="${i === palette.sel}"><span class="pmark ${esc(s.provider)}"></span>
-      <span class="t">${hilite(s.title, q)}</span><span class="when">${esc(ago(s.ended))}</span>
-      <span class="where">${esc([tildify(s.root), s.branch].filter(Boolean).join("   "))}</span></button>`);
+
+  palette.items.forEach((it, i) => {
+    if (q && i === 0 && nNamed) list.append(h(`<div class="palette-group">Sessions</div>`));
+    if (i === nNamed) list.append(h(`<div class="palette-group">In transcripts</div>`));
+    const s = it.s, where = esc([tildify(s.root), s.branch].filter(Boolean).join("   "));
+    let row;
+    if (!it.sh) {
+      row = h(`<button class="prow" role="option" aria-selected="${i === palette.sel}"><span class="pmark ${esc(s.provider)}"></span>
+        <span class="t">${hilite(s.title, q)}</span><span class="when">${esc(ago(s.ended))}</span>
+        <span class="where">${where}</span></button>`);
+    } else {
+      const hit = it.sh.hits[0];
+      const label = FIELD[hit.field] || (hit.field === "output" ? `${hit.tool} output` : hit.tool);
+      row = h(`<button class="prow hrow" role="option" aria-selected="${i === palette.sel}"><span class="pmark ${esc(s.provider)}"></span>
+        <span class="t">${esc(s.title)}</span><span class="when">${esc(ago(s.ended))}</span>
+        <span class="snip"><span class="k">${esc(label)}</span>${snippetHTML(hit.snippet)}</span>
+        <span class="where">${plural(it.sh.count, "matching step")}<span class="sep"></span>${where}</span></button>`);
+    }
     row.onmousemove = () => { if (palette.sel !== i) { palette.sel = i; markPalette(); } };
-    row.onclick = () => { closePalette(); go(s.key); };
+    row.onclick = () => choosePalette(it);
     list.append(row);
   });
+
+  if (!q) return;
+  let status = "";
+  if (!r) status = "Searching transcripts…";
+  else if (r.building) status = `Reading transcripts, ${r.indexed} of ${r.total} so far…`;
+  else if (!r.sessions.length) status = nNamed ? "No transcript matches." : `Nothing matches “${esc(raw.trim())}”.`;
+  else if (r.more) status = "More sessions match. Add a word to narrow it down.";
+  if (status) list.append(h(`<div class="palette-${!r || r.building || r.sessions.length ? "note" : "empty"}">${status}</div>`));
+}
+
+async function searchTranscripts() {
+  clearTimeout(palette.timer);
+  const raw = $("#palette-q").value;
+  if (!raw.trim() || $("#palette").hidden) return;
+  const seq = ++palette.seq;
+  let r;
+  try { r = await api(`/api/search?limit=30&q=${encodeURIComponent(raw)}`); }
+  catch (e) { r = { sessions: [], error: e.message }; }
+  if (seq !== palette.seq || $("#palette").hidden) return;
+  palette.hits = { q: raw, r };
+  renderPalette();
+  if (r.building) palette.timer = setTimeout(searchTranscripts, 800);
+}
+
+function choosePalette(it) {
+  closePalette();
+  if (it.sh) openMatch(it.sh, it.sh.hits[0], palette.hits.q);
+  else go(it.s.key);
 }
 function markPalette() {
   $$("#palette-list .prow").forEach((r, i) => r.setAttribute("aria-selected", i === palette.sel));
   $$("#palette-list .prow")[palette.sel]?.scrollIntoView({ block: "nearest" });
 }
-function openPalette() {
+function openPalette(q = "") {
   if (!state.data) return;
   $("#palette").hidden = false;
-  $("#palette-q").value = "";
+  $("#palette-q").value = q;
   palette.sel = 0;
+  palette.hits = null;
   renderPalette();
   $("#palette-q").focus();
+  if (q) searchTranscripts();
 }
-function closePalette() { $("#palette").hidden = true; }
+function closePalette() { $("#palette").hidden = true; clearTimeout(palette.timer); palette.seq++; }
 
 /* ---------------- routing & refresh ---------------- */
 function route() {
@@ -906,13 +1039,18 @@ async function init() {
   $("#q").addEventListener("focus", () => ($("#q-hint").hidden = true));
   $("#q").addEventListener("blur", () => ($("#q-hint").hidden = false));
   $("#menu").onclick = () => $("#app").classList.toggle("drawer");
-  $("#palette-open").onclick = openPalette;
+  $("#palette-open").onclick = () => openPalette();
   $("#palette").addEventListener("mousedown", (e) => { if (e.target.id === "palette") closePalette(); });
-  $("#palette-q").addEventListener("input", () => { palette.sel = 0; renderPalette(); });
+  $("#palette-q").addEventListener("input", () => {
+    palette.sel = 0;
+    renderPalette();
+    clearTimeout(palette.timer);
+    palette.timer = setTimeout(searchTranscripts, 140);
+  });
   $("#palette-q").addEventListener("keydown", (e) => {
     if (e.key === "ArrowDown") { e.preventDefault(); palette.sel = Math.min(palette.items.length - 1, palette.sel + 1); markPalette(); }
     if (e.key === "ArrowUp") { e.preventDefault(); palette.sel = Math.max(0, palette.sel - 1); markPalette(); }
-    if (e.key === "Enter" && palette.items[palette.sel]) { const s = palette.items[palette.sel]; closePalette(); go(s.key); }
+    if (e.key === "Enter" && palette.items[palette.sel]) choosePalette(palette.items[palette.sel]);
   });
   document.addEventListener("click", (e) => {
     if ($("#app").classList.contains("drawer") && !e.target.closest("#side, #menu")) closeDrawer();
@@ -925,6 +1063,7 @@ async function init() {
     if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
     if (e.key === "j") moveSession(1);
     if (e.key === "k") moveSession(-1);
+    if (e.key === "n" || e.key === "N") stepFind(e.shiftKey ? -1 : 1);
   });
   window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => trace.draw());
   setInterval(async () => {

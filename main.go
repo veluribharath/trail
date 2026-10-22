@@ -40,6 +40,7 @@ func main() {
 	opencodeDir := flag.String("opencode-dir", filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(homeDir(), ".local", "share")), "opencode"), "OpenCode data directory (holds opencode.db)")
 	open := flag.Bool("open", false, "open the browser after starting")
 	list := flag.Bool("list", false, "print sessions grouped by folder and exit")
+	search := flag.String("search", "", "print sessions whose transcripts match a query and exit")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -56,6 +57,13 @@ func main() {
 		printList(idx)
 		return
 	}
+	srch := NewSearch(idx)
+	if *search != "" {
+		srch.Sync()
+		printSearch(idx, srch, *search)
+		return
+	}
+	srch.Kick()
 
 	ln, err := net.Listen("tcp", net.JoinHostPort(*host, strconv.Itoa(*port)))
 	if err != nil {
@@ -83,7 +91,7 @@ func main() {
 		openBrowser(url)
 	}
 
-	srv := &Server{index: idx, home: homeDir(), version: currentVersion()}
+	srv := &Server{index: idx, search: srch, home: homeDir(), version: currentVersion()}
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := httpSrv.Serve(ln); err != nil {
 		fmt.Fprintln(os.Stderr, "trail:", err)
@@ -107,6 +115,38 @@ func printList(idx *Index) {
 				oneLine(s.Title, 60), s.Edits, s.ID)
 		}
 	}
+}
+
+func printSearch(idx *Index, srch *Search, q string) {
+	res := srch.Run(ParseQuery(q+" "), "", 50)
+	if len(res.Sessions) == 0 {
+		fmt.Println("no matches")
+		return
+	}
+	for _, sh := range res.Sessions {
+		s := idx.Get(sh.Key)
+		if s == nil {
+			continue
+		}
+		fmt.Printf("%s  %s  %s  (%d %s)\n", s.Ended.Local().Format("2006-01-02 15:04"), oneLine(s.Title, 60), s.ID, sh.Count, plural(sh.Count, "step", "steps"))
+		for _, h := range sh.Hits {
+			var b strings.Builder
+			for _, seg := range h.Snippet {
+				b.WriteString(seg.Text)
+			}
+			fmt.Printf("    #%-4d %-8s %s\n", h.Event+1, h.Field, oneLine(b.String(), 100))
+		}
+	}
+	if res.More {
+		fmt.Println("(more sessions matched; narrow the query)")
+	}
+}
+
+func plural(n int, one, many string) string {
+	if n == 1 {
+		return one
+	}
+	return many
 }
 
 func envOr(key, def string) string {

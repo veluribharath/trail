@@ -36,6 +36,7 @@
   --claude: #7c5cd6;
   --codex: #0b8a8f;
   --opencode: #c0407a;
+  --find: #2563c9;
   --hover: rgba(15, 23, 41, .05);
   --select: rgba(178, 111, 14, .11);
   --shadow: 0 1px 2px rgba(15, 23, 41, .06), 0 8px 24px -12px rgba(15, 23, 41, .18);
@@ -77,6 +78,7 @@
     --claude: #a990fa;
     --codex: #3fc8cc;
     --opencode: #f07fb0;
+    --find: #79a8ff;
     --hover: rgba(231, 235, 243, .045);
     --select: rgba(242, 181, 68, .10);
     --shadow: 0 1px 0 rgba(255, 255, 255, .03) inset, 0 8px 24px -12px rgba(0, 0, 0, .6);
@@ -281,6 +283,16 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .lg-tool { height: 7px; background: var(--faint); }
 .lg-edit { height: 10px; background: var(--blaze); }
 .lg-err { height: 10px; background: var(--del); }
+.lg-find { width: 9px !important; height: 3px; background: var(--find); }
+.trace-legend .find { margin-left: auto; gap: 4px; color: var(--muted); }
+.trace-legend .find > span { margin-right: 4px; font-variant-numeric: tabular-nums; }
+.find-btn {
+  display: inline-grid; place-items: center; width: 22px; height: 22px; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--muted); cursor: pointer;
+}
+.find-btn:hover { background: var(--hover); color: var(--ink); }
+.find-btn svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.find-btn[data-d="-1"] svg { rotate: 180deg; }
 
 /* ---- panes ---- */
 .panes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); min-height: 0; }
@@ -461,6 +473,23 @@ details.tool svg.ic { color: var(--faint); }
 .prow .pmark { grid-row: 1 / 3; }
 .prow mark { background: none; color: var(--blaze); }
 .palette-empty { padding: 28px 16px; color: var(--muted); font-size: 13px; text-align: center; }
+.palette-note { padding: 10px 12px 8px; color: var(--faint); font-size: 12px; }
+.palette-group { padding: 10px 10px 4px; color: var(--faint); font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; }
+.hrow .pmark, .hrow .when { grid-row: 1 / 4; }
+.hrow .snip {
+  grid-column: 2; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  color: var(--ink-2); font-size: 12.5px; line-height: 1.45; overflow-wrap: anywhere;
+}
+.hrow .snip .k { margin-right: 7px; color: var(--faint); font-size: 11.5px; font-weight: 600; }
+.hrow .snip mark { padding: 0 1px; border-radius: 3px; background: var(--blaze-fill); color: var(--blaze-ink); }
+.hrow .where .sep::before { content: "·"; margin: 0 6px; }
+.deep-search {
+  display: flex; align-items: center; gap: 8px; width: calc(100% - 16px); margin: 6px 8px; padding: 8px 10px;
+  border: 1px dashed var(--line); border-radius: var(--r); background: transparent; color: var(--muted); font-size: 12.5px; text-align: left; cursor: pointer;
+}
+.deep-search:hover { color: var(--ink); border-color: var(--faint); background: var(--hover); }
+.deep-search svg { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; }
+.deep-search span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .tip {
   position: fixed; z-index: 60; max-width: 340px; padding: 7px 10px; border-radius: var(--r); background: var(--ink); color: var(--surface);
