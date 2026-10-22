@@ -23,20 +23,11 @@ import (
 type opencodeProvider struct {
 	dir string
 
+	once     sync.Once
+	snaps    *sqliteSnapshots
 	mu       sync.Mutex
-	snap     *opencodeSnap
 	stamps   map[string]string // path -> stamp, from the last Discover
 	stampsDB *sqliteDB         // the snapshot stamps were read from
-}
-
-// opencodeSnap is one open, consistent view of the database. A new one is
-// opened when the database or its WAL changes; the old one is closed once
-// nothing is reading it.
-type opencodeSnap struct {
-	db    *sqliteDB
-	key   string
-	refs  int
-	stale bool
 }
 
 func (p *opencodeProvider) Name() string { return "opencode" }
@@ -45,42 +36,11 @@ func (p *opencodeProvider) dbPath() string {
 	return filepath.Join(p.dir, "opencode.db")
 }
 
-// acquire returns the current snapshot, opening a new one if the database
-// changed. Call the returned func when done reading.
+// acquire returns the current snapshot of the database. Call the returned
+// func when done reading.
 func (p *opencodeProvider) acquire() (*sqliteDB, func(), error) {
-	key := ""
-	for _, f := range []string{p.dbPath(), p.dbPath() + "-wal"} {
-		if fi, err := os.Stat(f); err == nil {
-			key += fmt.Sprintf("%d@%d;", fi.Size(), fi.ModTime().UnixNano())
-		} else {
-			key += "-;"
-		}
-	}
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.snap == nil || p.snap.key != key {
-		db, err := openSQLite(p.dbPath())
-		if err != nil {
-			return nil, nil, err
-		}
-		if old := p.snap; old != nil {
-			old.stale = true
-			if old.refs == 0 {
-				old.db.Close()
-			}
-		}
-		p.snap = &opencodeSnap{db: db, key: key}
-	}
-	s := p.snap
-	s.refs++
-	return s.db, func() {
-		p.mu.Lock()
-		defer p.mu.Unlock()
-		s.refs--
-		if s.stale && s.refs == 0 {
-			s.db.Close()
-		}
-	}, nil
+	p.once.Do(func() { p.snaps = &sqliteSnapshots{path: p.dbPath()} })
+	return p.snaps.acquire()
 }
 
 func (p *opencodeProvider) Discover() ([]string, error) {
