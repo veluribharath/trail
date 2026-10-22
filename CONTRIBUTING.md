@@ -10,6 +10,7 @@ You need Go 1.24 or newer.
 git clone https://github.com/veluribharath/trail
 cd trail
 make test      # go vet + go test
+make fuzz      # each fuzz test for a minute (FUZZTIME=10m for longer)
 make run       # build and open the UI on your own sessions
 ```
 
@@ -30,6 +31,7 @@ Agents people have asked for are listed under "Not yet" in the README. When a fo
 
 ## Pull requests
 
-- Run `make test` before opening one. CI runs the same checks on Linux and macOS.
+- Run `make test` before opening one. CI runs the same checks on Linux and macOS, plus a short `make fuzz`.
+- `make test` includes a UI smoke test that drives the page in headless Chrome. It skips when it can't find Chrome or Chromium; point `TRAIL_CHROME` at one to run it. If you touch the SQLite reader or a parser, run `make fuzz` for a while too.
 - For UI changes, include a screenshot in both light and dark mode.
 - Keep commits focused, with messages that say why the change was made.
