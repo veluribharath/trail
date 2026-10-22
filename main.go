@@ -8,6 +8,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -117,6 +118,10 @@ func main() {
 	notes := NewNoteStore(notesPath())
 	if *list {
 		printList(idx)
+		if len(idx.Sessions()) == 0 {
+			fmt.Fprintln(os.Stderr, "no sessions found. trail looked in:")
+			printSources(os.Stderr, status, true)
+		}
 		return
 	}
 	if *listNotes {
@@ -217,13 +222,7 @@ func main() {
 	}
 
 	fmt.Printf("trail %s\n", currentVersion())
-	for _, s := range status {
-		state := "not found"
-		if s.Found {
-			state = fmt.Sprintf("%d sessions", s.Sessions)
-		}
-		fmt.Printf("  %-8s %-40s %s\n", s.Name, s.Root, state)
-	}
+	printSources(os.Stdout, status, len(idx.Sessions()) == 0)
 	fmt.Printf("  indexed in %s\n  open %s\n", time.Since(start).Round(time.Millisecond), url)
 	if sem != nil {
 		fmt.Printf("  semantic %s at %s, vectors cached in %s\n", *embedModel, *embedURL, cacheDir())
@@ -275,6 +274,31 @@ func printList(idx *Index) {
 		for _, s := range byRoot[root] {
 			fmt.Printf("  %-8s %s  %-60s %3d edits  %s\n", s.Provider, s.Ended.Local().Format("2006-01-02 15:04"),
 				oneLine(s.Title, 60), s.Edits, s.ID)
+		}
+	}
+}
+
+// printSources says, for each agent, where trail looked and what it found
+// there. With hints it also says how to point it somewhere else.
+func printSources(w io.Writer, status []ProviderStatus, hints bool) {
+	for _, s := range status {
+		var state string
+		switch s.State {
+		case "found":
+			state = fmt.Sprintf("%d %s", s.Sessions, plural(s.Sessions, "session", "sessions"))
+		case "empty":
+			state = "no sessions"
+		case "unreadable":
+			state = "can't read"
+		default:
+			state = "not found"
+		}
+		fmt.Fprintf(w, "  %-8s %-14s %s\n", s.Name, state, strings.Join(s.Checked, ", "))
+		if s.Error != "" {
+			fmt.Fprintf(w, "  %-8s %-14s %s\n", "", "", s.Error)
+		}
+		if hints && s.State != "found" && s.Override != "" {
+			fmt.Fprintf(w, "  %-8s %-14s set %s to look elsewhere\n", "", "", s.Override)
 		}
 	}
 }

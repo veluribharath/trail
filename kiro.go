@@ -81,6 +81,10 @@ type kiroCLIHeader struct {
 func (p *kiroProvider) Name() string { return "kiro" }
 func (p *kiroProvider) Root() string { return p.dir }
 
+func (p *kiroProvider) Sources() []string {
+	return []string{filepath.Join(p.dir, "sessions"), p.dbPath()}
+}
+
 func (p *kiroProvider) dbPath() string { return filepath.Join(p.dataDir, "data.sqlite3") }
 func (p *kiroProvider) cliDir() string { return filepath.Join(p.dir, "sessions", "cli") }
 

@@ -637,3 +637,55 @@ func TestGeminiParse(t *testing.T) {
 		t.Errorf("legacy session: %+v %v", lt.Session, err)
 	}
 }
+
+func TestSourceState(t *testing.T) {
+	empty := t.TempDir()
+	os.MkdirAll(filepath.Join(empty, "sessions"), 0o755)
+	broken := t.TempDir()
+	os.WriteFile(filepath.Join(broken, "tmp"), []byte("not a folder"), 0o600)
+	// Statuses are counted by provider name, so each case is a different agent.
+	idx := NewIndex(&claudeProvider{dir: "testdata/claude"}, &codexProvider{dir: empty}, &geminiProvider{dir: broken},
+		&kiroProvider{dir: filepath.Join(empty, "nope"), dataDir: filepath.Join(empty, "nope")}, &opencodeProvider{dir: empty})
+	want := []string{"found", "empty", "unreadable", "missing", "missing"}
+	status := idx.Scan(0)
+	for i, st := range status {
+		if st.State != want[i] {
+			t.Errorf("%d %s: state %q, want %q (%+v)", i, st.Name, st.State, want[i], st)
+		}
+		if st.Override == "" || len(st.Checked) == 0 {
+			t.Errorf("%d %s: no override or checked paths: %+v", i, st.Name, st)
+		}
+	}
+	if got := status[4].Checked[0]; got != filepath.Join(empty, "opencode.db") {
+		t.Errorf("opencode checks its database, not its folder: %s", got)
+	}
+
+	var b strings.Builder
+	printSources(&b, status, true)
+	for _, s := range []string{"no sessions", "can't read", "not found", "set -codex-dir or CODEX_HOME"} {
+		if !strings.Contains(b.String(), s) {
+			t.Errorf("printSources is missing %q:\n%s", s, b.String())
+		}
+	}
+}
+
+func TestSourceStatePartial(t *testing.T) {
+	dir := t.TempDir()
+	copyTree(t, "testdata/kiro/home", dir)
+	data := t.TempDir()
+	os.WriteFile(filepath.Join(data, "data.sqlite3"), []byte("not a database"), 0o600)
+	st := NewIndex(&kiroProvider{dir: dir, dataDir: data}).Scan(0)[0]
+	if st.State != "found" || st.Sessions == 0 || st.Error == "" {
+		t.Errorf("sessions read despite a bad database are found, with the error kept: %+v", st)
+	}
+}
+
+func TestSourceStateCached(t *testing.T) {
+	broken := t.TempDir()
+	os.WriteFile(filepath.Join(broken, "tmp"), []byte("not a folder"), 0o600)
+	idx := NewIndex(&geminiProvider{dir: broken})
+	idx.Scan(0)
+	if st := idx.Scan(time.Hour)[0]; st.State != "unreadable" || st.Error == "" {
+		t.Errorf("a scan served from cache keeps the error: %+v", st)
+	}
+}

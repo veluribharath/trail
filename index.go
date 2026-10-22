@@ -25,6 +25,8 @@ type Index struct {
 	scanned  time.Time
 	scanning sync.Mutex
 
+	errs map[string]string // provider -> its last Discover error
+
 	rootsMu sync.Mutex
 	roots   map[string][2]string // cwd -> {repo root, worktree}
 }
@@ -35,11 +37,61 @@ type entry struct {
 }
 
 type ProviderStatus struct {
-	Name     string `json:"name"`
-	Root     string `json:"root"`
-	Found    bool   `json:"found"`
-	Sessions int    `json:"sessions"`
-	Error    string `json:"error,omitempty"`
+	Name     string   `json:"name"`
+	Root     string   `json:"root"`
+	Found    bool     `json:"found"`
+	Sessions int      `json:"sessions"`
+	Error    string   `json:"error,omitempty"`
+	State    string   `json:"state"`    // found, missing, empty or unreadable
+	Checked  []string `json:"checked"`  // the paths trail looked at
+	Override string   `json:"override"` // the flag and env var that move them
+}
+
+// providerOverride names what moves each provider's directory, for the
+// empty state. main.go sets the defaults these override.
+var providerOverride = map[string]string{
+	"claude":   "-claude-dir or CLAUDE_CONFIG_DIR",
+	"codex":    "-codex-dir or CODEX_HOME",
+	"opencode": "-opencode-dir or XDG_DATA_HOME",
+	"gemini":   "-gemini-dir or GEMINI_CLI_HOME",
+	"kiro":     "-kiro-dir and -kiro-data-dir",
+}
+
+// sourceState says why a provider shows no sessions: one of its paths can't
+// be read, none of them exist, or they exist and hold nothing trail can read.
+func (st *ProviderStatus) sourceState() {
+	exists := false
+	for _, path := range st.Checked {
+		fi, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err == nil {
+			exists = true
+			if fi.IsDir() {
+				_, err = os.ReadDir(path)
+			} else if f, ferr := os.Open(path); ferr != nil {
+				err = ferr
+			} else {
+				f.Close()
+			}
+		}
+		if err != nil && st.Error == "" {
+			st.Error = err.Error()
+		}
+	}
+	// Sessions found despite an error (say, Kiro's files but not its
+	// database) still count as found; Error says what was missed.
+	switch {
+	case st.Sessions > 0:
+		st.State = "found"
+	case st.Error != "":
+		st.State = "unreadable"
+	case !exists:
+		st.State = "missing"
+	default:
+		st.State = "empty"
+	}
 }
 
 func NewIndex(providers ...Provider) *Index {
@@ -47,6 +99,7 @@ func NewIndex(providers ...Provider) *Index {
 		providers: providers,
 		entries:   map[string]*entry{},
 		byKey:     map[string]*Session{},
+		errs:      map[string]string{},
 		roots:     map[string][2]string{},
 	}
 }
@@ -71,11 +124,17 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 	live := map[string]bool{}
 
 	for _, p := range x.providers {
-		st := ProviderStatus{Name: p.Name(), Root: p.Root()}
+		st := ProviderStatus{Name: p.Name(), Root: p.Root(), Checked: []string{p.Root()}, Override: providerOverride[p.Name()]}
+		if src, ok := p.(sourcer); ok {
+			st.Checked = src.Sources()
+		}
 		if _, err := os.Stat(p.Root()); err == nil {
 			st.Found = true
 		}
 		if fresh {
+			x.mu.Lock()
+			st.Error = x.errs[p.Name()]
+			x.mu.Unlock()
 			status = append(status, st)
 			continue
 		}
@@ -83,6 +142,9 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 		if err != nil {
 			st.Error = err.Error()
 		}
+		x.mu.Lock()
+		x.errs[p.Name()] = st.Error
+		x.mu.Unlock()
 		for _, path := range paths {
 			stamp, ok := sessionStamp(p, path)
 			if !ok {
@@ -174,6 +236,9 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 		}
 	}
 	x.mu.Unlock()
+	for i := range status {
+		status[i].sourceState()
+	}
 	return status
 }
 

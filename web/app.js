@@ -432,7 +432,7 @@ function renderProviders() {
   el.innerHTML = "";
   for (const p of state.data.providers) {
     const b = h(`<button class="chip" aria-pressed="${!state.hidden.has(p.name)}" ${p.sessions ? "" : "disabled"}
-      title="${esc(p.found ? tildify(p.root) : tildify(p.root) + " isn't on this machine")}"><span class="pmark ${esc(p.name)}"></span>${esc(PROVIDERS[p.name] || p.name)}<span class="n">${p.sessions}</span></button>`);
+      title="${esc((p.checked || [p.root]).map(tildify).join(", ") + ({ missing: " isn’t on this machine", empty: " has no sessions", unreadable: " can’t be read" }[p.state] || ""))}"><span class="pmark ${esc(p.name)}"></span>${esc(PROVIDERS[p.name] || p.name)}<span class="n">${p.sessions}</span></button>`);
     b.onclick = () => {
       state.hidden.has(p.name) ? state.hidden.delete(p.name) : state.hidden.add(p.name);
       renderSidebar();
@@ -544,7 +544,7 @@ function renderHome() {
   view.innerHTML = "";
   if (!d.sessions.length) {
     view.append(h(`<div class="home"><div class="home-inner"><h1>No sessions yet</h1>
-      <p class="lede">trail reads the sessions Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI keep on this machine. Run any of them in a project, then rescan.</p>
+      <p class="lede">trail reads the sessions Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI keep on this machine, and found none. Below is where it looked for each one. Run an agent in a project and rescan, or if yours keeps sessions somewhere else, restart trail with the flag shown.</p>
       <h2>Where trail looks</h2><div class="sources"></div></div></div>`));
   } else {
     view.append(h(`<div class="home"><div class="home-inner">
@@ -566,9 +566,12 @@ function renderHome() {
   setupBlameForm(view);
   const src = $(".sources", view);
   for (const p of d.providers) {
-    src.append(h(`<div class="src"><span class="pmark ${esc(p.name)}"></span><span>${esc(PROVIDERS[p.name] || p.name)}</span>
-      <span class="path" title="${esc(p.root)}">${esc(tildify(p.root))}</span>
-      <span class="state ${p.found ? "" : "missing"}">${p.found ? plural(p.sessions, "session") : "Not on this machine"}</span></div>`));
+    const paths = p.checked || [p.root];
+    const state = { found: plural(p.sessions, "session"), empty: "No sessions yet", unreadable: "Can’t read it" }[p.state] || "Not on this machine";
+    const why = [p.error ? p.error.replace(/\.?$/, ".") : "", p.state !== "found" && p.override ? `Set ${p.override} to look elsewhere.` : ""].filter(Boolean).join(" ");
+    src.append(h(`<div class="src ${esc(p.state || "")}"><span class="pmark ${esc(p.name)}"></span><span>${esc(PROVIDERS[p.name] || p.name)}</span>
+      <span class="path" title="${esc(paths.join("\n"))}">${esc(paths.map(tildify).join(", "))}</span>
+      <span class="state">${state}</span>${why ? `<span class="why">${esc(why)}</span>` : ""}</div>`));
   }
 }
 

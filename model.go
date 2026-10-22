@@ -45,6 +45,12 @@ type sessionStamper interface {
 	Stamp(path string) (stamp string, ok bool)
 }
 
+// sourcer is implemented by providers that read from somewhere other than
+// Root, or from more than one place, so the empty state can name each one.
+type sourcer interface {
+	Sources() []string
+}
+
 // Session is the summary row shown in the folder tree.
 type Session struct {
 	Key      string `json:"key"` // provider:id, unique across providers
