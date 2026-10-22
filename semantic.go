@@ -47,8 +47,7 @@ type Semantic struct {
 }
 
 type semSession struct {
-	size   int64
-	mod    time.Time
+	stamp  string
 	key    string
 	dims   int
 	events []int32 // first step of each chunk
@@ -99,13 +98,17 @@ func (s *Semantic) Sync(ctx context.Context) error {
 func (s *Semantic) sync(ctx context.Context) error {
 	files := s.idx.files()
 	// Newest first: recent sessions are the likeliest to be searched.
-	sort.Slice(files, func(i, j int) bool { return files[i].mod.After(files[j].mod) })
+	ended := map[string]time.Time{}
+	for _, se := range s.idx.Sessions() {
+		ended[se.Key] = se.Ended
+	}
+	sort.Slice(files, func(i, j int) bool { return ended[files[i].key].After(ended[files[j].key]) })
 	live := map[string]bool{}
 	var todo []indexedFile
 	s.mu.Lock()
 	for _, f := range files {
 		live[f.path] = true
-		if ss := s.byPath[f.path]; ss != nil && ss.size == f.size && ss.mod.Equal(f.mod) {
+		if ss := s.byPath[f.path]; ss != nil && ss.stamp == f.stamp {
 			ss.key = f.key
 			continue
 		}
@@ -149,9 +152,9 @@ func (s *Semantic) sync(ctx context.Context) error {
 	return failure
 }
 
-// load returns a session's vectors from the disk cache when they are current,
-// and otherwise embeds the session and caches the result. A nil session with
-// no error means there was nothing to embed.
+// load returns a session's vectors from the disk cache when they are current
+// (same session stamp and model), and otherwise embeds the session and caches
+// the result. A nil session with no error means there was nothing to embed.
 func (s *Semantic) load(ctx context.Context, f indexedFile) (*semSession, error) {
 	if ss := s.readCache(f); ss != nil {
 		return ss, nil
@@ -161,7 +164,7 @@ func (s *Semantic) load(ctx context.Context, f indexedFile) (*semSession, error)
 		return nil, nil
 	}
 	events, texts := chunkTranscript(t)
-	ss := &semSession{size: f.size, mod: f.mod, key: f.key}
+	ss := &semSession{stamp: f.stamp, key: f.key}
 	for i := 0; i < len(texts); i += embedBatch {
 		batch := texts[i:min(len(texts), i+embedBatch)]
 		docs := make([]string, len(batch))
@@ -296,8 +299,7 @@ func (s *Semantic) Status() *SemanticStatus {
 
 type semMatch struct {
 	path, key string
-	size      int64
-	mod       time.Time
+	stamp     string
 	best      float64
 	events    []int // matching chunk starts, best first
 }
@@ -322,7 +324,7 @@ func (s *Semantic) match(ctx context.Context, q Query, only string, limit int) (
 		if ss.dims != len(qv) || (only != "" && ss.key != only) || (q.agent != "" && !strings.HasPrefix(ss.key, q.agent)) {
 			continue
 		}
-		m := semMatch{path: path, key: ss.key, size: ss.size, mod: ss.mod}
+		m := semMatch{path: path, key: ss.key, stamp: ss.stamp}
 		type hit struct {
 			ev  int
 			sim float64
@@ -423,7 +425,7 @@ func (s *Semantic) Blend(ctx context.Context, q Query, res SearchResult, only st
 // addRelated adds a session's closest turns to its hits, after any word
 // matches, and to its matching steps.
 func (s *Semantic) addRelated(sh *SessionHits, m semMatch, q Query) {
-	t := s.search.transcriptAt(m.path, m.key, m.size, m.mod)
+	t := s.search.transcriptAt(m.path, m.key, m.stamp)
 	if t == nil {
 		return
 	}
@@ -468,7 +470,7 @@ func containsInt(xs []int, x int) bool {
 
 /* ---------------- disk cache ---------------- */
 
-const cacheMagic = "trailvec1"
+const cacheMagic = "trailvec2"
 
 // cacheFile names a session's vectors by a hash of its path, so the cache
 // directory doesn't spell out project folders.
@@ -490,8 +492,7 @@ func (s *Semantic) readCache(f indexedFile) *semSession {
 	var hdr struct {
 		Magic string `json:"magic"`
 		Path  string `json:"path"`
-		Size  int64  `json:"size"`
-		Mod   int64  `json:"mod"`
+		Stamp string `json:"stamp"`
 		Model string `json:"model"`
 		Dims  int    `json:"dims"`
 		N     int    `json:"n"`
@@ -500,11 +501,11 @@ func (s *Semantic) readCache(f indexedFile) *semSession {
 	if err != nil || json.Unmarshal(line, &hdr) != nil {
 		return nil
 	}
-	if hdr.Magic != cacheMagic || hdr.Path != f.path || hdr.Size != f.size || hdr.Mod != f.mod.UnixNano() ||
+	if hdr.Magic != cacheMagic || hdr.Path != f.path || hdr.Stamp != f.stamp ||
 		hdr.Model != s.model || hdr.Dims <= 0 || hdr.N < 0 || hdr.N > 1<<24 || hdr.Dims > 1<<14 {
 		return nil
 	}
-	ss := &semSession{size: f.size, mod: f.mod, key: f.key, dims: hdr.Dims, events: make([]int32, hdr.N), vecs: make([]int8, hdr.N*hdr.Dims)}
+	ss := &semSession{stamp: f.stamp, key: f.key, dims: hdr.Dims, events: make([]int32, hdr.N), vecs: make([]int8, hdr.N*hdr.Dims)}
 	if binary.Read(r, binary.LittleEndian, ss.events) != nil || binary.Read(r, binary.LittleEndian, ss.vecs) != nil {
 		return nil
 	}
@@ -525,7 +526,7 @@ func (s *Semantic) writeCache(f indexedFile, ss *semSession) {
 		return
 	}
 	var buf bytes.Buffer
-	hdr, _ := json.Marshal(map[string]any{"magic": cacheMagic, "path": f.path, "size": f.size, "mod": f.mod.UnixNano(),
+	hdr, _ := json.Marshal(map[string]any{"magic": cacheMagic, "path": f.path, "stamp": f.stamp,
 		"model": s.model, "dims": ss.dims, "n": len(ss.events)})
 	buf.Write(hdr)
 	buf.WriteByte('\n')

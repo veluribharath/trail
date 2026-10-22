@@ -14,7 +14,7 @@ import (
 
 // Search is an in-memory full-text index over every transcript. It follows
 // the session index: a session file is re-read only when the session index
-// saw its size or mtime change. Nothing is written to disk.
+// saw it change. Nothing is written to disk.
 //
 // The index holds postings, not text. Snippets and phrase checks re-read the
 // few sessions a result shows, through a small cache of parsed transcripts.
@@ -38,8 +38,7 @@ type Search struct {
 }
 
 type searchSession struct {
-	size  int64
-	mod   time.Time
+	stamp string
 	key   string
 	docs  []docMeta
 	post  []uint64           // term id<<32 | doc<<8 | tf, sorted
@@ -111,7 +110,7 @@ func (s *Search) sync() {
 	s.mu.Lock()
 	for _, f := range files {
 		live[f.path] = true
-		if ss := s.byPath[f.path]; ss != nil && ss.size == f.size && ss.mod.Equal(f.mod) {
+		if ss := s.byPath[f.path]; ss != nil && ss.stamp == f.stamp {
 			ss.key = f.key
 			continue
 		}
@@ -185,7 +184,7 @@ func (s *Search) build(f indexedFile) {
 	var ss *searchSession
 	t, err := s.idx.parseFull(f.provider, f.path)
 	if t != nil && (err == nil || len(t.Events) > 0) {
-		ss = &searchSession{size: f.size, mod: f.mod, key: f.key, edits: map[int32][]string{}}
+		ss = &searchSession{stamp: f.stamp, key: f.key, edits: map[int32][]string{}}
 	}
 	type pair struct {
 		term string
@@ -824,24 +823,22 @@ func phrasesIn(fields []string, phrases []string) bool {
 }
 
 type cachedTranscript struct {
-	path string
-	size int64
-	mod  time.Time
-	t    *Transcript
+	path  string
+	stamp string
+	t     *Transcript
 }
 
 // transcript returns the parsed session a candidate was indexed from, or nil
 // when the file has changed since (the next sync will catch up).
 func (s *Search) transcript(c candidate) *Transcript {
-	return s.transcriptAt(c.path, c.key, c.ss.size, c.ss.mod)
+	return s.transcriptAt(c.path, c.key, c.ss.stamp)
 }
 
-// transcriptAt parses a session file through the cache, as of the given size
-// and mtime.
-func (s *Search) transcriptAt(path, key string, size int64, mod time.Time) *Transcript {
+// transcriptAt parses a session through the cache, as of the given stamp.
+func (s *Search) transcriptAt(path, key, stamp string) *Transcript {
 	s.cacheMu.Lock()
 	for i, ct := range s.cache {
-		if ct.path == path && ct.size == size && ct.mod.Equal(mod) {
+		if ct.path == path && ct.stamp == stamp {
 			s.cache = append(append(s.cache[:i:i], s.cache[i+1:]...), ct)
 			s.cacheMu.Unlock()
 			return ct.t
@@ -856,7 +853,7 @@ func (s *Search) transcriptAt(path, key string, size int64, mod time.Time) *Tran
 	}
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
-	s.cache = append(s.cache, &cachedTranscript{path, size, mod, t})
+	s.cache = append(s.cache, &cachedTranscript{path, stamp, t})
 	if len(s.cache) > cacheSize {
 		s.cache = s.cache[1:]
 	}

@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,9 +29,8 @@ type Index struct {
 }
 
 type entry struct {
-	size int64
-	mod  time.Time
-	sess *Session
+	stamp string
+	sess  *Session
 }
 
 type ProviderStatus struct {
@@ -59,9 +61,9 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 	x.mu.Unlock()
 
 	type job struct {
-		p    Provider
-		path string
-		fi   os.FileInfo
+		p     Provider
+		path  string
+		stamp string
 	}
 	var jobs []job
 	status := make([]ProviderStatus, 0, len(x.providers))
@@ -81,18 +83,18 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 			st.Error = err.Error()
 		}
 		for _, path := range paths {
-			fi, err := os.Stat(path)
-			if err != nil {
+			stamp, ok := sessionStamp(p, path)
+			if !ok {
 				continue
 			}
 			live[path] = true
 			x.mu.Lock()
 			e := x.entries[path]
 			x.mu.Unlock()
-			if e != nil && e.size == fi.Size() && e.mod.Equal(fi.ModTime()) {
+			if e != nil && e.stamp == stamp {
 				continue
 			}
-			jobs = append(jobs, job{p, path, fi})
+			jobs = append(jobs, job{p, path, stamp})
 		}
 		status = append(status, st)
 	}
@@ -120,7 +122,7 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 					s.Key = s.Provider + ":" + s.ID
 					s.Root, s.Worktree = x.repoRoot(s.Cwd)
 					x.mu.Lock()
-					x.entries[j.path] = &entry{size: j.fi.Size(), mod: j.fi.ModTime(), sess: s}
+					x.entries[j.path] = &entry{stamp: j.stamp, sess: s}
 					x.mu.Unlock()
 				}
 			}()
@@ -174,6 +176,20 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 	return status
 }
 
+// sessionStamp returns a value that changes whenever the session at path
+// does: the file's size and mtime, or the provider's own stamp for sessions
+// that aren't files.
+func sessionStamp(p Provider, path string) (string, bool) {
+	if st, ok := p.(sessionStamper); ok {
+		return st.Stamp(path)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", false
+	}
+	return strconv.FormatInt(fi.Size(), 10) + "@" + strconv.FormatInt(fi.ModTime().UnixNano(), 10), true
+}
+
 // Sessions returns a snapshot of every indexed session, newest first. They are
 // copies, so a later scan renaming a session can't race with the caller.
 func (x *Index) Sessions() []*Session {
@@ -209,7 +225,20 @@ func (x *Index) Load(key string) (*Transcript, error) {
 	}
 	for _, p := range x.providers {
 		if p.Name() == s.Provider {
-			t, err := p.Parse(s.Path, true)
+			var t *Transcript
+			var err error
+			if lp, ok := p.(lineParser); ok {
+				var b []byte
+				if b, err = readComplete(s.Path); err != nil {
+					return nil, err
+				}
+				t, err = lp.ParseLines(bytes.NewReader(b), s.Path, true)
+				if t != nil {
+					t.Size = int64(len(b))
+				}
+			} else {
+				t, err = p.Parse(s.Path, true)
+			}
 			if t != nil {
 				t.Session.Key, t.Session.Root, t.Session.Worktree = s.Key, s.Root, s.Worktree
 				if n, ok := p.(sessionNamer); ok {
@@ -262,12 +291,26 @@ func (x *Index) repoRoot(cwd string) (root, worktree string) {
 	return root, worktree
 }
 
+// readComplete reads a session file's complete lines. The agents append one
+// JSON line per write, so text after the last newline that isn't valid JSON
+// yet is a line still being written; it is left for the next read. The file is
+// closed before returning, so trail never holds it open while the agent works.
+func readComplete(path string) ([]byte, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if end := bytes.LastIndexByte(b, '\n') + 1; end < len(b) && !json.Valid(b[end:]) {
+		b = b[:end]
+	}
+	return b, nil
+}
+
 // indexedFile is a session file the index holds, for the search index to
 // follow without re-statting anything.
 type indexedFile struct {
 	path, key, provider string
-	size                int64
-	mod                 time.Time
+	stamp               string
 }
 
 func (x *Index) files() []indexedFile {
@@ -275,7 +318,7 @@ func (x *Index) files() []indexedFile {
 	defer x.mu.Unlock()
 	out := make([]indexedFile, 0, len(x.entries))
 	for path, e := range x.entries {
-		out = append(out, indexedFile{path: path, key: e.sess.Key, provider: e.sess.Provider, size: e.size, mod: e.mod})
+		out = append(out, indexedFile{path: path, key: e.sess.Key, provider: e.sess.Provider, stamp: e.stamp})
 	}
 	return out
 }

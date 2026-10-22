@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"path/filepath"
 	"strings"
 	"time"
@@ -20,11 +21,28 @@ type Provider interface {
 	Parse(path string, full bool) (*Transcript, error)
 }
 
+// lineParser is implemented by providers whose sessions are append-only JSONL
+// files. The index hands them only the file's complete lines, so a viewer
+// opening a session mid-write never sees half a line, and live updates know
+// exactly how far they have read.
+type lineParser interface {
+	ParseLines(r io.Reader, path string, full bool) (*Transcript, error)
+}
+
 // sessionNamer is implemented by providers that keep session names outside
 // the session files, keyed by session id. It is called on every scan, so it
 // should be cheap when nothing changed.
 type sessionNamer interface {
 	SessionNames() map[string]string
+}
+
+// sessionStamper is implemented by providers whose sessions are not one file
+// each (OpenCode keeps every session in one database). Discover returns a
+// path per session, and Stamp returns a value that changes whenever that
+// session does, in place of the file's size and mtime. ok is false for a
+// session that no longer exists.
+type sessionStamper interface {
+	Stamp(path string) (stamp string, ok bool)
 }
 
 // Session is the summary row shown in the folder tree.
@@ -62,6 +80,9 @@ type Transcript struct {
 	Session *Session     `json:"session"`
 	Events  []Event      `json:"events"`
 	Changes []FileChange `json:"changes"`
+	// Size is how many bytes of the session file were read: every complete
+	// line at the time. Live updates continue from it.
+	Size int64 `json:"size"`
 }
 
 // Event is one entry in the transcript.

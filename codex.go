@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -119,6 +120,10 @@ func (p *codexProvider) Parse(path string, full bool) (*Transcript, error) {
 		return nil, err
 	}
 	defer f.Close()
+	return p.ParseLines(f, path, full)
+}
+
+func (p *codexProvider) ParseLines(f io.Reader, path string, full bool) (*Transcript, error) {
 
 	t := &Transcript{Session: &Session{Provider: "codex", Path: path}}
 	s := t.Session
