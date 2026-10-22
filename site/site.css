@@ -191,6 +191,8 @@ h2 { font-size: clamp(28px, 3.6vw, 40px); }
 .card > svg { width: 26px; height: 26px; fill: none; stroke: var(--blaze); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; margin-bottom: 18px; }
 .card h3 { font-size: 19px; margin-bottom: 8px; }
 .card p { color: var(--muted); font-size: 15.5px; }
+.card.wide { grid-column: 1 / -1; }
+.card.wide pre { margin-top: 16px; padding-right: 64px; }
 .keys { margin: 14px 0 0; display: grid; gap: 7px; font-size: 14.5px; }
 .keys div { display: grid; grid-template-columns: 74px 1fr; align-items: center; }
 .keys dt { display: flex; gap: 3px; }
