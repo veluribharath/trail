@@ -167,7 +167,9 @@ func BuildStats(sessions []*Session, per map[string]*sessionStats, q StatsQuery)
 	if from.IsZero() {
 		from = q.To
 		for _, s := range picked {
-			if at := sessionStart(s); at.Before(from) {
+			// A session with no timestamps would stretch the range back to
+			// year one; it still counts in the totals.
+			if at := sessionStart(s); !at.IsZero() && at.Before(from) {
 				from = at
 			}
 		}

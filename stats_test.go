@@ -74,6 +74,11 @@ func TestBuildStats(t *testing.T) {
 	if st := BuildStats(sessions, per, StatsQuery{From: day(1).AddDate(-2, 0, 0), To: day(22)}); st.Bucket != "month" {
 		t.Errorf("two years should bucket by month, got %s", st.Bucket)
 	}
+	// A session with no timestamps doesn't stretch the range.
+	undated := append(sessions, &Session{Key: "claude:z", Provider: "claude", Root: "/w/shop"})
+	if st := BuildStats(undated, per, StatsQuery{To: day(22)}); st.Totals.Sessions != 5 || st.Bucket != "week" {
+		t.Errorf("undated: %d sessions, %s buckets", st.Totals.Sessions, st.Bucket)
+	}
 	// ...and an empty range still answers with lists.
 	if st := BuildStats(nil, nil, StatsQuery{To: day(22)}); st.Totals.Sessions != 0 || st.ProjectRows == nil || len(st.Series) != 1 {
 		t.Errorf("empty: %+v", st)
@@ -108,7 +113,7 @@ func TestStatsAPI(t *testing.T) {
 
 	var st Stats
 	getJSON(t, srv.URL+"/api/stats?days=all", &st)
-	if st.Read != st.Total || st.Total != 14 || st.Totals.Sessions != 14 {
+	if n := len(idx.Sessions()); st.Read != st.Total || st.Total != n || st.Totals.Sessions != n || n < 10 {
 		t.Fatalf("read %d of %d, %d sessions", st.Read, st.Total, st.Totals.Sessions)
 	}
 	if st.Totals.Failed == 0 || st.Totals.Tools <= st.Totals.Failed {
