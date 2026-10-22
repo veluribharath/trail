@@ -7,6 +7,13 @@ test:
 	go vet ./...
 	go test ./...
 
+# Each fuzz test for FUZZTIME (default 1m). Crashes are saved under testdata/fuzz/.
+FUZZTIME ?= 1m
+fuzz:
+	for f in FuzzSQLite FuzzOpenCode FuzzParsePatch FuzzTranscripts; do \
+		go test -run '^$$' -fuzz "^$$f$$" -fuzztime $(FUZZTIME) -fuzzminimizetime 5s . || exit 1; \
+	done
+
 run: build
 	./trail -open
 
@@ -17,4 +24,4 @@ site:
 	cp web/fonts/* _site/fonts/
 	cp docs/screenshot.png _site/
 
-.PHONY: build test run site
+.PHONY: build test fuzz run site

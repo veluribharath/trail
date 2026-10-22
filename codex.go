@@ -464,19 +464,29 @@ func parsePatch(patch, cwd string) []FileChange {
 		}
 		return filepath.Join(cwd, p)
 	}
+	// A header with no path (a patch cut off mid-line) names no file; its
+	// lines are skipped rather than filed under the working directory.
+	file := func(l, prefix, op string) *FileChange {
+		if strings.TrimSpace(l[len(prefix):]) == "" {
+			return nil
+		}
+		return &FileChange{Path: abs(l[len(prefix):]), Op: op}
+	}
 	for _, l := range strings.Split(patch, "\n") {
 		switch {
 		case strings.HasPrefix(l, "*** Update File: "):
 			flushFile()
-			cur = &FileChange{Path: abs(l[len("*** Update File: "):]), Op: "update"}
+			cur = file(l, "*** Update File: ", "update")
 		case strings.HasPrefix(l, "*** Add File: "):
 			flushFile()
-			cur = &FileChange{Path: abs(l[len("*** Add File: "):]), Op: "add"}
+			cur = file(l, "*** Add File: ", "add")
 		case strings.HasPrefix(l, "*** Delete File: "):
 			flushFile()
-			out = append(out, FileChange{Path: abs(l[len("*** Delete File: "):]), Op: "delete"})
+			if c := file(l, "*** Delete File: ", "delete"); c != nil {
+				out = append(out, *c)
+			}
 		case strings.HasPrefix(l, "*** Move to: "):
-			if cur != nil {
+			if cur != nil && strings.TrimSpace(l[len("*** Move to: "):]) != "" {
 				cur.Op = "move"
 				cur.MoveTo = abs(l[len("*** Move to: "):])
 			}
