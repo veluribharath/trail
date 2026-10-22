@@ -901,7 +901,7 @@ function hilite(text, q) {
   if (i < 0) return esc(text);
   return esc(text.slice(0, i)) + `<mark>${esc(text.slice(i, i + q.length))}</mark>` + esc(text.slice(i + q.length));
 }
-const FIELD = { prompt: "Prompt", reply: "Reply", thinking: "Thinking" };
+const FIELD = { prompt: "Prompt", reply: "Reply", thinking: "Thinking", related: "Related" };
 const snippetHTML = (segs) => segs.map((g) => (g.m ? `<mark>${esc(g.t)}</mark>` : esc(g.t))).join("");
 
 function renderPalette() {
@@ -948,6 +948,9 @@ function renderPalette() {
   else if (!r.sessions.length) status = nNamed ? "No transcript matches." : `Nothing matches “${esc(raw.trim())}”.`;
   else if (r.more) status = "More sessions match. Add a word to narrow it down.";
   if (status) list.append(h(`<div class="palette-${!r || r.building || r.sessions.length ? "note" : "empty"}">${status}</div>`));
+  const sem = r?.semantic;
+  if (sem?.error) list.append(h(`<div class="palette-note">Related sessions are off: ${esc(sem.error)}</div>`));
+  else if (sem && sem.embedded < sem.total) list.append(h(`<div class="palette-note">Finding related sessions: ${sem.embedded} of ${sem.total} read by ${esc(sem.model)} so far…</div>`));
 }
 
 async function searchTranscripts() {
@@ -962,6 +965,7 @@ async function searchTranscripts() {
   palette.hits = { q: raw, r };
   renderPalette();
   if (r.building) palette.timer = setTimeout(searchTranscripts, 800);
+  else if (r.semantic && !r.semantic.error && r.semantic.embedded < r.semantic.total) palette.timer = setTimeout(searchTranscripts, 3000);
 }
 
 function choosePalette(it) {

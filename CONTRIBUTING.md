@@ -19,7 +19,7 @@ The UI lives in `web/` as plain `index.html`, `style.css` and `app.js`. Edit the
 
 - **Read-only.** trail never writes to an agent's storage. Keep it that way.
 - **Never commit real transcripts.** Session logs contain prompts, file contents, command output and often secrets. Fixtures in `testdata/` must be written by hand or generated, never copied from your own `~/.claude` or `~/.codex`.
-- **Nothing off the machine.** The page loads no external scripts, fonts or images, and trail makes no network calls besides running `git` locally.
+- **Nothing off the machine.** The page loads no external scripts, fonts or images, and trail makes no network calls besides running `git` locally. The one exception is opt-in: `-semantic` sends turn text to the embedding server the person points it at (localhost by default) and caches vectors in trail's own cache directory. Keep anything like it behind a flag.
 - **No new dependencies** without a good reason. The standard library has covered everything so far.
 
 ## Adding an agent
