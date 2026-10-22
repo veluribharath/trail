@@ -4,6 +4,8 @@ const PROVIDERS = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode",
 const PER_FOLDER = 6;
 const WRITE_PREVIEW = 400;
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+// A page written by trail -export carries one session and has no server behind it.
+const EXPORTED = (() => { const el = document.getElementById("trail-export"); return el ? JSON.parse(el.textContent) : null; })();
 
 const state = {
   data: null, // /api/sessions response
@@ -53,6 +55,7 @@ const ICON = {
   folder: '<path d="M2.5 4.5a1 1 0 0 1 1-1h3l1.5 1.5h4.5a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-9a1 1 0 0 1-1-1z"/>',
   copy: '<rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 5.5V3.5a1 1 0 0 0-1-1h-6a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2"/>',
   check: '<path d="M3.5 8.5l3 3 6-7"/>',
+  download: '<path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2M3 13.5h10"/>',
   branch: '<circle cx="5" cy="3.8" r="1.4"/><circle cx="5" cy="12.2" r="1.4"/><circle cx="11" cy="6" r="1.4"/><path d="M5 5.2v5.6M11 7.4c0 2.4-6 1.6-6 3.4"/>',
   clock: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',
   chip: '<rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"/>',
@@ -415,8 +418,10 @@ function sessionHeader() {
         <div class="meta">${meta}</div>
         <div class="facts">${facts}</div>
       </div>
-      <div class="actions"><span class="live" ${live.on ? "" : "hidden"} title="The agent is still writing this session. New steps appear as it works.">Live</span><button class="btn" id="copy" title="${esc(s.resume)}">${svg("copy")}<span>Copy resume command</span></button></div>
+      <div class="actions">${EXPORTED ? exportedActions() : `<span class="live" ${live.on ? "" : "hidden"} title="The agent is still writing this session. New steps appear as it works.">Live</span><button class="btn" id="export" title="Save this session as one HTML file">${svg("download")}<span>Export</span></button><button class="btn" id="copy" title="${esc(s.resume)}">${svg("copy")}<span>Copy resume command</span></button>`}</div>
     </header>`);
+  if (EXPORTED) { setupExportFind(head); return head; }
+  $("#export", head).onclick = () => exportDialog(s);
   $("#copy", head).onclick = async (e) => {
     const b = e.currentTarget, label = $("span", b);
     try {
@@ -426,6 +431,78 @@ function sessionHeader() {
     setTimeout(() => { b.classList.remove("done"); b.querySelector("svg").innerHTML = ICON.copy; label.textContent = "Copy resume command"; }, 1800);
   };
   return head;
+}
+
+/* ---------------- export ---------------- */
+function exportDialog(s) {
+  $(".dlg")?.remove();
+  const d = h(`<dialog class="dlg" aria-labelledby="dlg-title"><form method="dialog">
+    <h2 id="dlg-title">Export this session</h2>
+    <p>Saves the transcript, its edits and the commits that touch them as one HTML file. It opens in any browser without trail and never goes online.</p>
+    <p class="warn">Transcripts can contain secrets: API keys, tokens, environment variables, file contents and command output. Read the file before you share it.</p>
+    <div class="dlg-actions"><button class="btn" value="cancel">Cancel</button><a class="btn primary" href="/api/export?id=${encodeURIComponent(s.key)}" download>${svg("download")}<span>Download HTML</span></a></div>
+  </form></dialog>`);
+  $("a", d).onclick = () => setTimeout(() => d.close(), 0);
+  d.addEventListener("close", () => d.remove());
+  document.body.append(d);
+  d.showModal();
+}
+
+function exportedActions() {
+  const on = new Date(EXPORTED.exported);
+  const date = isNaN(on) ? "" : on.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return `<label class="find-in">${svg("search")}<input type="search" placeholder="Find in this session" aria-label="Find in this session" autocomplete="off" spellcheck="false"></label>
+    <span class="exported-on" title="Exported with trail ${esc(EXPORTED.version)}">Exported${date ? ` ${esc(date)}` : ""}</span>`;
+}
+
+// setupExportFind matches steps in the page itself, since there is no search
+// server; matches go on the trace like a search from the palette.
+function setupExportFind(head) {
+  const input = $(".find-in input", head);
+  if (state.find) input.value = state.find.q;
+  let timer = 0;
+  input.addEventListener("input", () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const t = state.transcript, words = input.value.toLowerCase().split(/\s+/).filter(Boolean);
+      state.find = null;
+      if (words.length) {
+        const events = [];
+        t.events.forEach((e, i) => {
+          const hay = [e.text, e.tool, e.summary, e.input, e.output].filter(Boolean).join("\n").toLowerCase();
+          if (words.every((w) => hay.includes(w))) events.push(i);
+        });
+        state.find = { q: input.value, key: t.session.key, events, i: -1 };
+      }
+      renderFind();
+      trace.draw();
+    }, 120);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); stepFind(e.shiftKey ? -1 : 1); }
+    if (e.key === "Escape") { input.value = ""; input.dispatchEvent(new Event("input")); input.blur(); }
+  });
+}
+
+function initExport() {
+  const t = EXPORTED.transcript;
+  t.events = t.events || [];
+  t.changes = t.changes || [];
+  state.data = { home: EXPORTED.home, sessions: [] };
+  state.current = t.session.key;
+  state.transcript = t;
+  state.diffs = t.changes.map(changeDiff);
+  state.stats = sessionStats(t);
+  state.commits = EXPORTED.commits;
+  if (!t.changes.length) state.tab = "commits";
+  renderSession();
+  document.addEventListener("keydown", (e) => {
+    const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName);
+    if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "/") { e.preventDefault(); $(".find-in input")?.focus(); }
+    if (e.key === "n" || e.key === "N") stepFind(e.shiftKey ? -1 : 1);
+  });
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => trace.draw());
 }
 
 function renderSession() {
@@ -714,7 +791,7 @@ function stopLive() {
 // or by the list's newer copy of it.
 function startLive() {
   const t = state.transcript, key = state.current;
-  if (!t || !key || live.key === key || t.session.key !== key) return;
+  if (EXPORTED || !t || !key || live.key === key || t.session.key !== key) return;
   const listed = state.data?.sessions.find((s) => s.key === key);
   const ended = Math.max(Date.parse(t.session.ended) || 0, Date.parse(listed?.ended) || 0);
   if (Date.now() - ended > LIVE_WINDOW) return;
@@ -782,7 +859,11 @@ function renderFind() {
     <button class="find-btn" data-d="1" title="Next match (N)" aria-label="Next match">${svg("chev")}</button>
     <button class="find-btn x" title="Clear matches" aria-label="Clear matches"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7"/></svg></button>`;
   $$("[data-d]", el).forEach((b) => (b.onclick = () => stepFind(+b.dataset.d)));
-  $(".x", el).onclick = () => { state.find = null; renderFind(); trace.draw(); };
+  $(".x", el).onclick = () => {
+    state.find = null; renderFind(); trace.draw();
+    const input = $(".find-in input");
+    if (input) input.value = "";
+  };
 }
 
 function stepFind(d) {
@@ -925,12 +1006,15 @@ async function renderCommits(pane) {
   }
   const r = state.commits;
   if (!r.available) {
-    pane.append(h(`<div class="empty-pane"><strong>Commits aren’t available</strong>${esc(r.reason)}</div>`));
+    pane.append(h(EXPORTED
+      ? `<div class="empty-pane"><strong>No commits in this export</strong>When it was exported: ${esc(r.reason)}</div>`
+      : `<div class="empty-pane"><strong>Commits aren’t available</strong>${esc(r.reason)}</div>`));
     return;
   }
-  pane.append(h(`<div class="window">Commits on any branch of <span class="mono">${esc(tildify(r.toplevel))}</span> from 10 minutes before this session started to 2 hours after it ended. Commits that touch files the agent edited come first.</div>`));
+  if (EXPORTED) pane.append(h(`<div class="window">Commits on any branch of <span class="mono">${esc(tildify(r.toplevel))}</span> from 10 minutes before this session started to 2 hours after it ended that touch files the agent edited. Other commits in that window aren’t part of the export.</div>`));
+  else pane.append(h(`<div class="window">Commits on any branch of <span class="mono">${esc(tildify(r.toplevel))}</span> from 10 minutes before this session started to 2 hours after it ended. Commits that touch files the agent edited come first.</div>`));
   if (!r.commits.length) {
-    pane.append(h(`<div class="empty-pane"><strong>No commits in that window</strong>The changes may still be uncommitted, or were committed later.</div>`));
+    pane.append(h(`<div class="empty-pane"><strong>No commits in that window</strong>${EXPORTED ? "None of the commits made while this session ran touch the files it edited." : "The changes may still be uncommitted, or were committed later."}</div>`));
     return;
   }
   const list = h(`<div class="changes"></div>`);
@@ -950,7 +1034,9 @@ async function renderCommits(pane) {
       patchEl = h(`<div class="patch"><div class="note">Loading…</div></div>`);
       b.after(patchEl);
       try {
-        const { patch } = await api(`/api/commit?id=${encodeURIComponent(key)}&sha=${encodeURIComponent(c.sha)}`);
+        const { patch } = EXPORTED
+          ? { patch: EXPORTED.patches?.[c.sha] ?? (() => { throw new Error("This commit’s patch couldn’t be read when the session was exported."); })() }
+          : await api(`/api/commit?id=${encodeURIComponent(key)}&sha=${encodeURIComponent(c.sha)}`);
         const rows = patch.split("\n").map((l) => {
           const k = l.startsWith("diff --git") || l.startsWith("commit ") ? "f"
             : l.startsWith("@@") ? "h" : l.startsWith("+") && !l.startsWith("+++") ? "a" : l.startsWith("-") && !l.startsWith("---") ? "d" : "";
@@ -1144,6 +1230,8 @@ async function init() {
     if ($("#app").classList.contains("drawer") && !e.target.closest("#side, #menu")) closeDrawer();
   });
   document.addEventListener("keydown", (e) => {
+    // The export dialog is modal: j/k behind it would change which session it exports.
+    if ($(".dlg[open]")) return;
     const typing = /^(INPUT|TEXTAREA)$/.test(document.activeElement?.tagName);
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); $("#palette").hidden ? openPalette() : closePalette(); return; }
     if (e.key === "Escape") { closePalette(); closeDrawer(); return; }
@@ -1162,4 +1250,4 @@ async function init() {
   }, 20000);
 }
 
-init();
+if (EXPORTED) initExport(); else init();
