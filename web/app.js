@@ -341,6 +341,7 @@ function renderDiffRows(rows, limit) {
 
 /* ---------------- session ---------------- */
 async function openSession(key) {
+  stopLive();
   if (state.find && state.find.key !== key) state.find = null;
   state.current = key;
   state.fileFilter = null;
@@ -370,6 +371,7 @@ async function openSession(key) {
     state.stats = sessionStats(t);
     if (!t.changes.length) state.tab = "commits";
     renderSession();
+    startLive();
     const jump = state.pendingJump;
     state.pendingJump = null;
     if (jump) requestAnimationFrame(() => showMatch(jump.event, jump.field));
@@ -388,10 +390,8 @@ function sessionStats(t) {
   return { tools, failed, prompts, files: new Set(t.changes.map((c) => c.rel)).size };
 }
 
-function renderSession() {
+function sessionHeader() {
   const t = state.transcript, s = t.session, st = state.stats;
-  const view = $("#view");
-  view.innerHTML = "";
   const named = s.titleKind !== "prompt";
   const meta = [
     `<span class="prov"><span class="pmark ${esc(s.provider)}"></span>${esc(PROVIDERS[s.provider] || s.provider)}</span>`,
@@ -408,16 +408,31 @@ function renderSession() {
     st.failed ? `<span class="bad"><b>${st.failed}</b> failed</span>` : "",
   ].join("");
 
-  const el = h(`<div class="session">
-    <header class="s-head">
+  const head = h(`<header class="s-head">
       <div class="titles">
         <h1 class="${named ? "" : "unnamed"}">${esc(s.title)}</h1>
         ${named && s.prompt ? `<p class="first-prompt" title="${esc(s.prompt)}">${esc(s.prompt)}</p>` : ""}
         <div class="meta">${meta}</div>
         <div class="facts">${facts}</div>
       </div>
-      <div class="actions"><button class="btn" id="copy" title="${esc(s.resume)}">${svg("copy")}<span>Copy resume command</span></button></div>
-    </header>
+      <div class="actions"><span class="live" ${live.on ? "" : "hidden"} title="The agent is still writing this session. New steps appear as it works.">Live</span><button class="btn" id="copy" title="${esc(s.resume)}">${svg("copy")}<span>Copy resume command</span></button></div>
+    </header>`);
+  $("#copy", head).onclick = async (e) => {
+    const b = e.currentTarget, label = $("span", b);
+    try {
+      await navigator.clipboard.writeText(s.resume);
+      b.classList.add("done"); b.querySelector("svg").innerHTML = ICON.check; label.textContent = "Copied";
+    } catch { label.textContent = "Couldn’t copy. Hover to read it."; }
+    setTimeout(() => { b.classList.remove("done"); b.querySelector("svg").innerHTML = ICON.copy; label.textContent = "Copy resume command"; }, 1800);
+  };
+  return head;
+}
+
+function renderSession() {
+  const t = state.transcript;
+  const view = $("#view");
+  view.innerHTML = "";
+  const el = h(`<div class="session">
     <div class="trace-wrap">
       <div class="trace" id="trace" role="slider" tabindex="0" aria-label="Session trace. Drag or use arrow keys to move through the transcript." aria-valuemin="1" aria-valuemax="${t.events.length}" aria-valuenow="1">
         <div class="win"></div><canvas></canvas>
@@ -442,14 +457,7 @@ function renderSession() {
       <section class="pane ch" aria-label="Changes"></section>
     </div></div>`);
 
-  $("#copy", el).onclick = async (e) => {
-    const b = e.currentTarget, label = $("span", b);
-    try {
-      await navigator.clipboard.writeText(s.resume);
-      b.classList.add("done"); b.querySelector("svg").innerHTML = ICON.check; label.textContent = "Copied";
-    } catch { label.textContent = "Couldn’t copy. Hover to read it."; }
-    setTimeout(() => { b.classList.remove("done"); b.querySelector("svg").innerHTML = ICON.copy; label.textContent = "Copy resume command"; }, 1800);
-  };
+  el.prepend(sessionHeader());
   $$(".pane-tabs button", el).forEach((b) => (b.onclick = () => setPane(b.dataset.pane)));
   $$("[data-f]", el).forEach((b) => (b.onclick = () => { state.filter = b.dataset.f; applyFilter(); }));
   view.append(el);
@@ -485,7 +493,8 @@ function evClass(e) {
   return c.join(" ");
 }
 
-function renderLog(root) {
+// renderLog appends rows for events from index `from` on.
+function renderLog(root, from = 0) {
   const t = state.transcript;
   if (!t.events.length) {
     root.append(h(`<div class="empty-pane"><strong>Empty transcript</strong>This session has no messages trail can read.</div>`));
@@ -493,7 +502,9 @@ function renderLog(root) {
   }
   const frag = document.createDocumentFragment();
   let lastClock = "";
+  for (let i = from - 1; i >= 0 && !lastClock; i--) lastClock = clock(t.events[i].time);
   t.events.forEach((e, i) => {
+    if (i < from) return;
     const c = clock(e.time);
     const timeCell = c && c !== lastClock ? c : "";
     if (c) lastClock = c;
@@ -679,6 +690,78 @@ function setupTrace() {
     if (to !== null) { ev.preventDefault(); trace.scrollTo(to, true); }
   });
   requestAnimationFrame(() => { trace.draw(); trace.update(); });
+}
+
+/* ---------------- live ---------------- */
+// A session the agent wrote to in the last few minutes is followed live: the
+// server streams what changed and new steps are drawn as they arrive.
+const LIVE_WINDOW = 10 * 60 * 1000;
+const live = { es: null, key: null, on: false };
+
+function setLive(on) {
+  live.on = on;
+  const b = $(".s-head .live");
+  if (b) b.hidden = !on;
+}
+
+function stopLive() {
+  live.es?.close();
+  live.es = live.key = null;
+  setLive(false);
+}
+
+// startLive follows the open session if it looks recent, by its own last event
+// or by the list's newer copy of it.
+function startLive() {
+  const t = state.transcript, key = state.current;
+  if (!t || !key || live.key === key || t.session.key !== key) return;
+  const listed = state.data?.sessions.find((s) => s.key === key);
+  const ended = Math.max(Date.parse(t.session.ended) || 0, Date.parse(listed?.ended) || 0);
+  if (Date.now() - ended > LIVE_WINDOW) return;
+  live.key = key;
+  const es = new EventSource(`/api/live?id=${encodeURIComponent(key)}&size=${t.size}`);
+  live.es = es;
+  es.addEventListener("ready", () => setLive(true));
+  es.addEventListener("update", (e) => {
+    if (state.current !== key || state.transcript !== t) return;
+    setLive(true);
+    try { applyLive(JSON.parse(e.data)); } catch (err) { console.error(err); }
+  });
+  // Idle or gone: close, or the browser would reconnect. The 20 s list
+  // refresh starts it again if the session moves.
+  const end = () => { if (live.es === es) { es.close(); live.es = live.key = null; setLive(false); } };
+  es.addEventListener("idle", end);
+  es.addEventListener("gone", end);
+  es.onerror = () => setLive(false);
+}
+
+function applyLive(u) {
+  const t = state.transcript;
+  const pane = $(".pane.log");
+  const atEnd = pane && pane.scrollHeight - pane.scrollTop - pane.clientHeight < 80;
+  const hadEvents = t.events.length > 0;
+  const changesBefore = t.changes.length;
+  t.events = t.events.slice(0, u.from).concat(u.events || []);
+  t.changes = t.changes.slice(0, u.changesFrom).concat(u.changes || []);
+  state.diffs = state.diffs.slice(0, u.changesFrom).concat((u.changes || []).map(changeDiff));
+  t.session = u.session;
+  t.size = u.size;
+  state.stats = sessionStats(t);
+  if (!hadEvents || u.from === 0 || !pane) {
+    renderSession();
+    return;
+  }
+  $(".s-head").replaceWith(sessionHeader());
+  $(".pane-tabs [data-pane=ch] .n").textContent = t.changes.length;
+  const root = $(".log-inner");
+  for (const row of $$(".ev", root)) if (+row.dataset.i >= u.from) row.remove();
+  renderLog(root, u.from);
+  trace.n = Math.max(1, t.events.length);
+  trace.el.setAttribute("aria-valuemax", t.events.length);
+  applyFilter();
+  if (state.tab === "files" && (u.changes?.length || u.changesFrom < changesBefore)) renderChangesPane();
+  if (atEnd) pane.scrollTop = pane.scrollHeight;
+  requestAnimationFrame(() => trace.update());
 }
 
 /* ---------------- transcript matches ---------------- */
@@ -992,6 +1075,7 @@ function route() {
   if (key && state.data.sessions.some((s) => s.key === key)) {
     if (key !== state.current) openSession(key);
   } else {
+    stopLive();
     state.current = null;
     renderSidebar();
     renderHome();
@@ -1070,6 +1154,7 @@ async function init() {
     if (document.hidden) return;
     const changed = await load();
     if (changed && !state.current) renderHome();
+    if (changed) startLive();
   }, 20000);
 }
 

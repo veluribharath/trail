@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"path/filepath"
 	"strings"
 	"time"
@@ -18,6 +19,14 @@ type Provider interface {
 	// Parse reads one session file. When full is false only the summary
 	// fields are needed, so adapters may skip building events.
 	Parse(path string, full bool) (*Transcript, error)
+}
+
+// lineParser is implemented by providers whose sessions are append-only JSONL
+// files. The index hands them only the file's complete lines, so a viewer
+// opening a session mid-write never sees half a line, and live updates know
+// exactly how far they have read.
+type lineParser interface {
+	ParseLines(r io.Reader, path string, full bool) (*Transcript, error)
 }
 
 // sessionNamer is implemented by providers that keep session names outside
@@ -62,6 +71,9 @@ type Transcript struct {
 	Session *Session     `json:"session"`
 	Events  []Event      `json:"events"`
 	Changes []FileChange `json:"changes"`
+	// Size is how many bytes of the session file were read: every complete
+	// line at the time. Live updates continue from it.
+	Size int64 `json:"size"`
 }
 
 // Event is one entry in the transcript.
