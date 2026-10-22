@@ -49,6 +49,7 @@ make build
 ./trail -search "flaky login"   # print matching sessions and steps, and exit
 ./trail -prices    # print the token prices used for costs, and exit
 ./trail -export c1 -o session.html   # write one session as an offline page, and exit
+./trail -compare c1 c2   # print two sessions side by side, and exit
 ```
 
 On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop. Transcripts often contain secrets, so only do this on a network you trust (or tunnel the port over SSH instead).
@@ -68,6 +69,7 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | `-embed-model` | `nomic-embed-text` |
 | `-prices` | print the price table and exit |
 | `-export`, `-o` | off; see [Export a session](#export-a-session) |
+| `-compare` | off; see [Compare two sessions](#compare-two-sessions) |
 
 ## What it reads
 
@@ -155,6 +157,20 @@ In the browser, open a session and choose Export, then Download HTML; your brows
 
 Transcripts can contain secrets: API keys, tokens, environment variables, file contents and command output. Read the file before you share it. The file itself can't make any network request: its content security policy blocks everything but its own inlined script, styles and fonts, so opening it never loads or sends anything. Commits made in the session's window that don't touch its files are left out.
 
+## Compare two sessions
+
+Put two sessions side by side: two agents given the same task, or one agent before and after you changed the prompt. Open a session, choose Compare, and pick the other one; sessions from the same folder are listed first, and any two sessions from any agents can be compared.
+
+The comparison shows:
+
+- **At a glance:** active time (pauses over 5 minutes left out), wall clock, steps, prompts, tool calls, failed calls, edits, files and lines changed, tokens and API-equivalent cost, each with B's difference from A.
+- **Steps:** both traces on one scale, so the longer run is visibly longer. Hover to read a step; click to open the session there.
+- **Prompts:** each session's prompts, and a word-by-word diff of the first prompt when they differ.
+- **Files:** every file either session changed, marked as changed by both or only one. Open a file to read each session's edits to it next to each other. Paths are matched relative to each session's checkout, so two agents in separate worktrees of one repository line up.
+- **Tools** and **failed tool calls** for each side.
+
+From the command line, `./trail -compare A B` prints the numbers and the file list. A and B are session ids, `provider:id`, or the start of an id, as for `-export`.
+
 ## How diffs and commits are matched
 
 The Edits tab comes straight from the transcript: each change is the before/after text the agent sent to its edit tool, so it is exact for that step. A Claude Code `Write` replaces the whole file, and the transcript doesn't say what was there before, so every line shows as added.
@@ -178,6 +194,7 @@ semantic.go  opt-in related-session search over a local embedding model
 git.go       commits in the session window
 server.go    JSON API and embedded UI
 export.go    one session as a self-contained HTML file
+compare.go   two sessions side by side, and -compare
 live.go      live updates for a session that is still being written
 usage.go     token counts per response and session
 prices.go    pricing, with the bundled prices.json and overrides

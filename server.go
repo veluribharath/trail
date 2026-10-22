@@ -32,6 +32,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/live", s.handleLive)
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/export", s.handleExport)
+	mux.HandleFunc("GET /api/compare", s.handleCompare)
 	sub, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", noCache(http.FileServer(http.FS(sub))))
 	return securityHeaders(mux)
@@ -99,6 +100,20 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="`+exportName(t.Session)+`"`)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(b.Bytes())
+}
+
+// handleCompare sends two sessions' transcripts with the comparison of them.
+func (s *Server) handleCompare(w http.ResponseWriter, r *http.Request) {
+	var ts [2]*Transcript
+	for i, k := range []string{"a", "b"} {
+		t, err := s.index.Load(r.URL.Query().Get(k))
+		if err != nil {
+			fail(w, http.StatusNotFound, "One of these sessions is no longer on disk. Refresh the list.")
+			return
+		}
+		ts[i] = t
+	}
+	writeJSON(w, map[string]any{"a": ts[0], "b": ts[1], "compare": Compare(ts[0], ts[1])})
 }
 
 func (s *Server) handleCommits(w http.ResponseWriter, r *http.Request) {

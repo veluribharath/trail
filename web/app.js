@@ -118,6 +118,7 @@ const ICON = {
   download: '<path d="M8 2.5v8M4.8 7.5 8 10.7l3.2-3.2M3 13.5h10"/>',
   branch: '<circle cx="5" cy="3.8" r="1.4"/><circle cx="5" cy="12.2" r="1.4"/><circle cx="11" cy="6" r="1.4"/><path d="M5 5.2v5.6M11 7.4c0 2.4-6 1.6-6 3.4"/>',
   clock: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',
+  compare: '<rect x="2.5" y="3" width="4.5" height="10" rx="1"/><rect x="9" y="3" width="4.5" height="10" rx="1"/>',
   chip: '<rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"/>',
 };
 const svg = (name, cls = "") => `<svg class="${cls}" viewBox="0 0 16 16" aria-hidden="true">${ICON[name]}</svg>`;
@@ -359,7 +360,11 @@ function renderHome() {
 /* ---------------- diff ---------------- */
 function lineDiff(a, b) {
   const lines = (x) => (x === "" ? [] : x.replace(/\n$/, "").split("\n"));
-  const A = lines(a), B = lines(b);
+  return seqDiff(lines(a), lines(b));
+}
+
+// seqDiff is the longest-common-subsequence diff of two lists of strings.
+function seqDiff(A, B) {
   const n = A.length, m = B.length;
   if (n * m > 4e6) return [...A.map((t) => ["d", t]), ...B.map((t) => ["a", t])];
   const dp = Array.from({ length: n + 1 }, () => new Uint32Array(m + 1));
@@ -502,12 +507,13 @@ function sessionHeader() {
         <div class="facts">${facts}</div>
         ${usage}
       </div>
-      <div class="actions">${EXPORTED ? exportedActions() : `<span class="live" ${live.on ? "" : "hidden"} title="The agent is still writing this session. New steps appear as it works.">Live</span><button class="btn" id="export" title="Save this session as one HTML file">${svg("download")}<span>Export</span></button><button class="btn" id="copy" title="${esc(s.resume)}">${svg("copy")}<span>Copy resume command</span></button>`}</div>
+      <div class="actions">${EXPORTED ? exportedActions() : `<span class="live" ${live.on ? "" : "hidden"} title="The agent is still writing this session. New steps appear as it works.">Live</span><button class="btn" id="compare" title="Put this session next to another one">${svg("compare")}<span>Compare</span></button><button class="btn" id="export" title="Save this session as one HTML file">${svg("download")}<span>Export</span></button><button class="btn" id="copy" title="${esc(s.resume)}">${svg("copy")}<span>Copy resume command</span></button>`}</div>
     </header>`);
   const tog = $("#usage-toggle", head);
   if (tog) tog.onclick = (e) => { e.stopPropagation(); setUsagePref(!usagePref.tokens); };
   if (EXPORTED) { setupExportFind(head); return head; }
   $("#export", head).onclick = () => exportDialog(s);
+  $("#compare", head).onclick = () => compareWith(s);
   $("#copy", head).onclick = async (e) => {
     const b = e.currentTarget, label = $("span", b);
     try {
@@ -741,6 +747,34 @@ function applyFilter() {
 }
 
 /* ---------------- trace ---------------- */
+// stepKind is how a step is drawn on a trace, and STEP_H its bar height.
+function stepKind(e) {
+  if (e.kind === "tool" && e.error) return "err";
+  if (e.kind === "tool" && e.changes?.length) return "edit";
+  return e.kind;
+}
+const STEP_H = { user: 0.72, edit: 0.56, err: 0.56, tool: 0.32, assistant: 0.22, thinking: 0.16 };
+function traceColors() {
+  const css = getComputedStyle(document.documentElement);
+  const col = (v) => css.getPropertyValue(v).trim();
+  return { user: col("--ink"), assistant: col("--muted"), tool: col("--faint"), thinking: col("--line"), edit: col("--blaze"), err: col("--del"), find: col("--find") };
+}
+// stepTip shows what a step on a trace is, under the pointer.
+function stepTip(ev, x, y) {
+  const tip = $("#tip");
+  let label;
+  if (ev.kind === "user") label = `<span class="k">Prompt</span><br>${esc(ev.text.slice(0, 160))}`;
+  else if (ev.kind === "assistant") label = `<span class="k">Reply</span><br>${esc(ev.text.slice(0, 160))}`;
+  else if (ev.kind === "thinking") label = `<span class="k">Thinking</span>`;
+  else label = `<span class="k">${esc(ev.tool)}${ev.error ? " failed" : ev.changes?.length ? `, ${plural(ev.changes.length, "edit")}` : ""}</span><br>${esc(ev.summary || "")}`;
+  const c = clock(ev.time);
+  tip.innerHTML = (c ? `<span class="k">${esc(c)}</span>&ensp;` : "") + label;
+  tip.hidden = false;
+  const r = tip.getBoundingClientRect();
+  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - r.width - 8, x - r.width / 2))}px`;
+  tip.style.top = `${y + 14}px`;
+}
+
 const trace = {
   el: null, canvas: null, win: null, ro: null, n: 0,
   pad: 8,
@@ -754,17 +788,12 @@ const trace = {
     this.canvas.width = W * dpr; this.canvas.height = H * dpr;
     const ctx = this.canvas.getContext("2d");
     ctx.scale(dpr, dpr);
-    const css = getComputedStyle(document.documentElement);
-    const col = (v) => css.getPropertyValue(v).trim();
-    const C = { user: col("--ink"), assistant: col("--muted"), tool: col("--faint"), thinking: col("--line"), edit: col("--blaze"), err: col("--del") };
+    const C = traceColors();
     const step = (W - this.pad * 2) / this.n;
     const bw = Math.max(1, Math.min(3, step * 0.6));
     const mid = H / 2;
     t.events.forEach((e, i) => {
-      let kind = e.kind, hgt;
-      if (e.kind === "tool" && e.error) kind = "err";
-      else if (e.kind === "tool" && e.changes?.length) kind = "edit";
-      hgt = { user: 0.72, edit: 0.56, err: 0.56, tool: 0.32, assistant: 0.22, thinking: 0.16 }[kind] * H;
+      const kind = stepKind(e), hgt = STEP_H[kind] * H;
       ctx.globalAlpha = visibleUnder(e, state.filter) ? 1 : 0.22;
       ctx.fillStyle = C[kind];
       const x = this.xOf(i) - bw / 2;
@@ -775,7 +804,7 @@ const trace = {
     const f = activeFind();
     if (f) {
       ctx.globalAlpha = 1;
-      ctx.fillStyle = col("--find");
+      ctx.fillStyle = C.find;
       const mw = Math.max(2, bw);
       for (const i of f.events) ctx.fillRect(this.xOf(i) - mw / 2, 0, mw, 4);
     }
@@ -808,20 +837,7 @@ const trace = {
     if (state.pane !== "log") setPane("log");
     pane.scrollTo({ top: row.offsetTop - 56, behavior: smooth ? "smooth" : "auto" });
   },
-  tip(e, x, y) {
-    const ev = state.transcript.events[e], tip = $("#tip");
-    let label;
-    if (ev.kind === "user") label = `<span class="k">Prompt</span><br>${esc(ev.text.slice(0, 160))}`;
-    else if (ev.kind === "assistant") label = `<span class="k">Reply</span><br>${esc(ev.text.slice(0, 160))}`;
-    else if (ev.kind === "thinking") label = `<span class="k">Thinking</span>`;
-    else label = `<span class="k">${esc(ev.tool)}${ev.error ? " failed" : ev.changes?.length ? `, ${plural(ev.changes.length, "edit")}` : ""}</span><br>${esc(ev.summary || "")}`;
-    const c = clock(ev.time);
-    tip.innerHTML = (c ? `<span class="k">${esc(c)}</span>&ensp;` : "") + label;
-    tip.hidden = false;
-    const r = tip.getBoundingClientRect();
-    tip.style.left = `${Math.max(8, Math.min(window.innerWidth - r.width - 8, x - r.width / 2))}px`;
-    tip.style.top = `${y + 14}px`;
-  },
+  tip(e, x, y) { stepTip(state.transcript.events[e], x, y); },
 };
 
 function setupTrace() {
@@ -1144,6 +1160,446 @@ async function renderCommits(pane) {
   pane.append(list);
 }
 
+/* ---------------- compare ---------------- */
+// Two sessions side by side: two agents given the same task, or one agent
+// before and after a prompt change. The server works out the numbers; the
+// page lays out each side's trace, prompts, edits and failures next to the
+// other's.
+const cmp = { a: null, b: null, data: null, seq: 0, open: new Set(), ro: null };
+
+function compareHash(a, b) {
+  return "#compare?" + new URLSearchParams(b ? { a, b } : { a }).toString();
+}
+function compareRoute() {
+  const m = location.hash.match(/^#compare\?(.*)$/);
+  if (!m) return null;
+  const p = new URLSearchParams(m[1]);
+  return { a: p.get("a"), b: p.get("b") };
+}
+const onCompare = () => location.hash.startsWith("#compare?");
+
+// pickSession asks for a session in a dialog, nearest first: the same folder
+// as near, then everything else by recency.
+function pickSession({ title, near, exclude }, done) {
+  $(".dlg")?.remove();
+  const d = h(`<dialog class="dlg pick" aria-labelledby="pick-title"><form method="dialog">
+    <h2 id="pick-title">${esc(title)}</h2>
+    <div class="palette-input"><svg viewBox="0 0 16 16" aria-hidden="true">${ICON.search}</svg>
+      <input placeholder="Filter by name, prompt or folder" autocomplete="off" spellcheck="false" aria-label="Filter sessions" aria-controls="pick-list"></div>
+    <div class="palette-list" id="pick-list" role="listbox"></div>
+    <div class="dlg-actions"><button class="btn" value="cancel">Cancel</button></div>
+  </form></dialog>`);
+  const input = $("input", d), list = $(".palette-list", d);
+  let items = [], sel = 0;
+  const draw = () => {
+    const q = input.value.trim().toLowerCase();
+    const all = state.data.sessions.filter((s) => s.key !== exclude);
+    const byRecent = (a, b) => (a.ended < b.ended ? 1 : -1);
+    let groups;
+    if (q) {
+      groups = [["", all.map((s) => [score(s, q), s]).filter(([sc]) => sc > 0).sort((a, b) => b[0] - a[0] || byRecent(a[1], b[1])).slice(0, 40).map(([, s]) => s)]];
+    } else {
+      const here = near ? all.filter((s) => s.root === near.root).sort(byRecent) : [];
+      const rest = all.filter((s) => !here.includes(s)).sort(byRecent).slice(0, 40);
+      groups = [[here.length ? "Same folder" : "", here], [here.length ? "Everywhere else" : "", rest]];
+    }
+    items = [];
+    list.innerHTML = "";
+    for (const [label, sessions] of groups) {
+      if (!sessions.length) continue;
+      if (label) list.append(h(`<div class="palette-group">${esc(label)}</div>`));
+      for (const s of sessions) {
+        const i = items.length;
+        items.push(s);
+        const where = esc([tildify(s.root), s.branch].filter(Boolean).join("   "));
+        const row = h(`<button type="button" class="prow" role="option" aria-selected="${i === sel}"><span class="pmark ${esc(s.provider)}"></span>
+          <span class="t">${hilite(s.title, q)}</span><span class="when">${esc(ago(s.ended))}</span>
+          <span class="where">${esc(PROVIDERS[s.provider] || s.provider)}<span class="sep"></span>${where}</span></button>`);
+        row.onmousemove = () => { if (sel !== i) { sel = i; mark(); } };
+        row.onclick = () => choose(s);
+        list.append(row);
+      }
+    }
+    if (!items.length) list.append(h(`<div class="palette-empty">${q ? `No session matches “${esc(input.value.trim())}”.` : "There is no other session to compare with."}</div>`));
+  };
+  const mark = () => {
+    $$(".prow", list).forEach((r, i) => r.setAttribute("aria-selected", i === sel));
+    $$(".prow", list)[sel]?.scrollIntoView({ block: "nearest" });
+  };
+  const choose = (s) => { d.close(); done(s); };
+  input.addEventListener("input", () => { sel = 0; draw(); });
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(items.length - 1, sel + 1); mark(); }
+    if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(0, sel - 1); mark(); }
+    if (e.key === "Enter") { e.preventDefault(); if (items[sel]) choose(items[sel]); }
+  });
+  d.addEventListener("close", () => d.remove());
+  document.body.append(d);
+  draw();
+  d.showModal();
+  input.focus();
+}
+
+function compareWith(s) {
+  pickSession({ title: "Compare with…", near: s, exclude: s.key }, (other) => { location.hash = compareHash(s.key, other.key); });
+}
+
+async function openCompare(a, b) {
+  const view = $("#view");
+  const known = (k) => state.data.sessions.find((s) => s.key === k);
+  if (!a || !known(a) || !b || !known(b)) {
+    const have = known(a) || known(b);
+    view.innerHTML = "";
+    view.append(h(`<div class="empty-pane"><strong>Pick two sessions to compare</strong>${have ? `Comparing “${esc(have.title)}” with another session.` : "One of these sessions isn’t on this machine any more."}</div>`));
+    if (have) compareWith(have);
+    return;
+  }
+  const seq = ++cmp.seq;
+  if (cmp.a !== a || cmp.b !== b) cmp.open.clear();
+  cmp.a = a; cmp.b = b;
+  view.innerHTML = `<div class="loading">Reading both sessions…</div>`;
+  let d;
+  try {
+    d = await api(`/api/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`);
+  } catch (e) {
+    if (seq === cmp.seq) view.innerHTML = `<div class="empty-pane"><strong>Couldn’t compare these sessions</strong>${esc(e.message)}</div>`;
+    return;
+  }
+  if (seq !== cmp.seq || !onCompare()) return;
+  for (const t of [d.a, d.b]) {
+    t.events = t.events || [];
+    t.changes = t.changes || [];
+    t.diffs = t.changes.map(changeDiff);
+  }
+  cmp.data = d;
+  try {
+    renderCompare();
+  } catch (e) {
+    console.error(e);
+    view.innerHTML = `<div class="empty-pane"><strong>Couldn’t compare these sessions</strong>The page hit an error while drawing it: ${esc(e.message)}</div>`;
+  }
+}
+
+// fmtSpan is a length of time in milliseconds, for side-by-side numbers.
+function fmtSpan(ms) {
+  const s = Math.round((ms || 0) / 1000);
+  if (s < 60) return `${s} s`;
+  if (s < 5400) return `${Math.round(s / 60)} min`;
+  return `${(s / 3600).toFixed(1).replace(/\.0$/, "")} h`;
+}
+
+const SIDES = ["a", "b"];
+
+function renderCompare() {
+  const d = cmp.data, c = d.compare;
+  const view = $("#view");
+  view.innerHTML = "";
+  const page = h(`<div class="cmp"><div class="cmp-inner">
+    <header class="cmp-head"><h1>Compare sessions</h1><div class="cmp-sides"></div></header>
+    <section class="cmp-sec"><h2>At a glance</h2><div class="cmp-glance"></div></section>
+    <section class="cmp-sec"><h2>Steps</h2><p class="cmp-note">Each bar is a step, on one scale, so the longer session runs further. Hover to read a step; click to open it.</p><div class="cmp-strips"></div></section>
+    <section class="cmp-sec"><h2>Prompts</h2><div class="cmp-prompts"></div></section>
+    <section class="cmp-sec"><h2>Files</h2><div class="cmp-files"></div></section>
+    <section class="cmp-sec"><h2>Tools</h2><div class="cmp-tools"></div></section>
+    <section class="cmp-sec"><h2>Failed tool calls</h2><div class="cmp-fails"></div></section>
+  </div></div>`);
+  view.append(page);
+
+  const sides = $(".cmp-sides", page);
+  sides.append(sideCard("a", d.a.session));
+  const swap = h(`<button class="icon-btn cmp-swap" title="Swap A and B" aria-label="Swap A and B"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5.5h9.5M10 3l2.5 2.5L10 8M13 10.5H3.5M6 8l-2.5 2.5L6 13"/></svg></button>`);
+  swap.onclick = () => { location.hash = compareHash(cmp.b, cmp.a); };
+  sides.append(swap);
+  sides.append(sideCard("b", d.b.session));
+
+  renderGlance($(".cmp-glance", page), c, d);
+  renderStrips($(".cmp-strips", page));
+  renderComparePrompts($(".cmp-prompts", page));
+  renderCompareFiles($(".cmp-files", page), c.files);
+  renderCompareTools($(".cmp-tools", page), c);
+  renderCompareFails($(".cmp-fails", page));
+}
+
+const sideMark = (k) => `<span class="cmp-mark ${k}">${k.toUpperCase()}</span>`;
+
+function sideCard(k, s) {
+  const where = s.worktree ? `worktree ${s.worktree.split("/").pop()}` : tildify(s.cwd);
+  const meta = [
+    `<span class="prov"><span class="pmark ${esc(s.provider)}"></span>${esc(PROVIDERS[s.provider] || s.provider)}</span>`,
+    s.model && `<span>${svg("chip")}${esc(s.model)}</span>`,
+    s.branch && `<span>${svg("branch")}${esc(s.branch)}</span>`,
+    `<span title="${esc(s.cwd)}">${svg("folder")}<span class="cwd"><bdi>${esc(where)}</bdi></span></span>`,
+    `<span>${svg("clock")}${esc(when(s.started))}</span>`,
+  ].filter(Boolean).join("");
+  const el = h(`<div class="cmp-side ${k}">
+    <div class="cmp-side-top">${sideMark(k)}<a class="cmp-title ${s.titleKind === "prompt" ? "unnamed" : ""}" href="#s=${encodeURIComponent(s.key)}" title="Open this session">${esc(s.title)}</a>
+      <button class="linkish">Change</button></div>
+    <div class="meta">${meta}</div></div>`);
+  $(".linkish", el).onclick = () => {
+    const other = k === "a" ? cmp.b : cmp.a;
+    pickSession({ title: `Replace ${k.toUpperCase()} with…`, near: s, exclude: other }, (pick) => {
+      location.hash = k === "a" ? compareHash(pick.key, cmp.b) : compareHash(cmp.a, pick.key);
+    });
+  };
+  return el;
+}
+
+// renderGlance is the table of numbers, with B's difference from A. Lower is
+// marked better only where it plainly is: time, failures, tokens and cost.
+function renderGlance(root, c, d) {
+  const A = c.a, B = c.b;
+  const ua = A.usage, ub = B.usage;
+  const rows = [
+    { label: "Active time", a: A.active, b: B.active, fmt: fmtSpan, lower: true, tip: "Time between steps, leaving out pauses longer than 5 minutes" },
+    { label: "Wall clock", a: A.wall, b: B.wall, fmt: fmtSpan, tip: "First step to last, pauses included" },
+    { label: "Steps", a: A.steps, b: B.steps, tip: "Every prompt, reply, thought and tool call" },
+    { label: "Prompts", a: A.prompts, b: B.prompts },
+    { label: "Tool calls", a: A.toolCalls, b: B.toolCalls },
+    { label: "Failed tool calls", a: A.failed, b: B.failed, lower: true, bad: true },
+    { label: "Edits", a: A.edits, b: B.edits, edit: true },
+    { label: "Files changed", a: A.files, b: B.files, edit: true },
+    { label: "Lines added", a: A.added, b: B.added, add: true },
+    { label: "Lines removed", a: A.removed, b: B.removed, del: true },
+  ];
+  if (ua || ub) {
+    const z = { input: 0, output: 0, cost: 0 };
+    const xa = ua || z, xb = ub || z;
+    // A session that recorded no token counts has nothing to subtract from.
+    const one = !ua || !ub;
+    rows.push({ label: "Tokens", a: totalTokens(xa), b: totalTokens(xb), fmt: fmtTokens, lower: true, approx: one,
+      labelA: ua ? undefined : "—", labelB: ub ? undefined : "—", tipA: ua && usageLines(ua), tipB: ub && usageLines(ub) });
+    rows.push({ label: "API-equivalent cost", a: xa.cost || 0, b: xb.cost || 0, fmt: fmtCost, lower: true, labelA: ua ? costLabel(ua) : "—", labelB: ub ? costLabel(ub) : "—",
+      approx: one || !!(xa.unpriced || xb.unpriced), tipA: ua && usageLines(ua), tipB: ub && usageLines(ub) });
+  }
+  const t = h(`<table class="cmp-table"><thead><tr><th></th><th>${sideMark("a")}</th><th>${sideMark("b")}</th><th>B − A</th></tr></thead><tbody></tbody></table>`);
+  const body = $("tbody", t);
+  for (const r of rows) {
+    const f = r.fmt || ((n) => n.toLocaleString());
+    const top = Math.max(r.a, r.b) || 1;
+    const cls = r.bad ? "bad" : r.edit ? "blz" : r.add ? "plus" : r.del ? "minus" : "";
+    const cell = (v, label, tip, k) => `<td class="v" ${tip ? `title="${esc(tip)}"` : ""}><span class="num ${v ? cls : ""}">${esc(label ?? f(v))}</span><span class="bar ${k}" style="width:${(100 * v) / top}%"></span></td>`;
+    const diff = r.b - r.a;
+    let delta, tone = "";
+    if (r.approx) delta = "—";
+    else if (diff === 0) delta = "same";
+    else {
+      delta = (diff > 0 ? "+" : "−") + f(Math.abs(diff));
+      if (r.a > 0) {
+        const pct = Math.round((100 * diff) / r.a);
+        if (pct !== 0 && Math.abs(pct) < 1000) delta += ` <span class="pct">(${pct > 0 ? "+" : "−"}${Math.abs(pct)}%)</span>`;
+      }
+      if (r.lower) tone = diff < 0 ? "good" : "worse";
+    }
+    body.append(h(`<tr><th scope="row" ${r.tip ? `title="${esc(r.tip)}"` : ""}>${esc(r.label)}</th>${cell(r.a, r.labelA, r.tipA, "a")}${cell(r.b, r.labelB, r.tipB, "b")}<td class="d ${tone}">${delta}</td></tr>`));
+  }
+  root.append(t);
+  const files = c.files.length;
+  if (files) {
+    root.append(h(`<p class="cmp-note">${c.shared ? `Both changed <b>${plural(c.shared, "file")}</b> of the ${plural(files, "file")} either one touched.` : `They changed different files: none of the ${plural(files, "file")} overlap.`}${(ua?.unpriced || ub?.unpriced) ? " Some responses have no price, so costs are lower bounds." : ""}</p>`));
+  }
+}
+
+// renderStrips draws each session's steps as a trace, both on the scale of the
+// longer one.
+function renderStrips(root) {
+  const d = cmp.data;
+  const n = Math.max(1, d.a.events.length, d.b.events.length);
+  const strips = SIDES.map((k) => {
+    const t = d[k];
+    const el = h(`<div class="cmp-strip">${sideMark(k)}<div class="cmp-canvas"><canvas></canvas></div><span class="n">${plural(t.events.length, "step")}</span></div>`);
+    root.append(el);
+    const box = $(".cmp-canvas", el), canvas = $("canvas", el), pad = 4;
+    const iAt = (x) => Math.floor(((x - pad) / (box.clientWidth - pad * 2)) * n);
+    const draw = () => {
+      const W = box.clientWidth, H = box.clientHeight, dpr = window.devicePixelRatio || 1;
+      if (!W || !H) return;
+      canvas.width = W * dpr; canvas.height = H * dpr;
+      const ctx = canvas.getContext("2d");
+      ctx.scale(dpr, dpr);
+      const C = traceColors(), step = (W - pad * 2) / n, bw = Math.max(1, Math.min(3, step * 0.6));
+      t.events.forEach((e, i) => {
+        const kind = stepKind(e), hgt = STEP_H[kind] * H;
+        ctx.fillStyle = C[kind];
+        const x = pad + (i + 0.5) * step - bw / 2;
+        ctx.beginPath();
+        ctx.roundRect ? ctx.roundRect(x, H / 2 - hgt / 2, bw, hgt, bw / 2) : ctx.rect(x, H / 2 - hgt / 2, bw, hgt);
+        ctx.fill();
+      });
+    };
+    box.addEventListener("pointermove", (ev) => {
+      const i = iAt(ev.clientX - box.getBoundingClientRect().left);
+      if (i < 0 || i >= t.events.length) { $("#tip").hidden = true; box.style.cursor = ""; return; }
+      box.style.cursor = "pointer";
+      stepTip(t.events[i], ev.clientX, box.getBoundingClientRect().bottom - 6);
+    });
+    box.addEventListener("pointerleave", () => { $("#tip").hidden = true; });
+    box.addEventListener("click", (ev) => {
+      const i = iAt(ev.clientX - box.getBoundingClientRect().left);
+      if (i >= 0 && i < t.events.length) openStep(t.session.key, i);
+    });
+    return draw;
+  });
+  const drawAll = () => strips.forEach((f) => f());
+  if (cmp.ro) cmp.ro.disconnect();
+  cmp.ro = new ResizeObserver(drawAll);
+  cmp.ro.observe(root);
+  root.append(h(`<div class="trace-legend"><span><i class="lg-prompt"></i>Prompt</span><span><i class="lg-tool"></i>Tool call</span><span><i class="lg-edit"></i>Edit</span><span><i class="lg-err"></i>Failed</span></div>`));
+  requestAnimationFrame(drawAll);
+}
+
+// openStep opens a session scrolled to one of its steps.
+function openStep(key, event) {
+  $("#tip").hidden = true;
+  state.pendingJump = { event, field: "" };
+  go(key);
+}
+
+// cols lays out one block per side, next to each other on a wide screen and
+// one under the other on a narrow one.
+function cols(root, fill) {
+  const grid = h(`<div class="cmp-cols"></div>`);
+  for (const k of SIDES) {
+    const col = h(`<div class="cmp-col ${k}"><div class="cmp-col-head">${sideMark(k)}<span>${esc(oneLine(cmp.data[k].session.title, 60))}</span></div></div>`);
+    fill(col, k, cmp.data[k]);
+    grid.append(col);
+  }
+  root.append(grid);
+}
+
+const oneLine = (s, n) => { s = String(s || "").replace(/\s+/g, " ").trim(); return s.length > n ? s.slice(0, n - 1) + "…" : s; };
+
+function renderComparePrompts(root) {
+  const d = cmp.data;
+  const prompts = (t) => t.events.map((e, i) => [e, i]).filter(([e]) => e.kind === "user");
+  const pa = prompts(d.a), pb = prompts(d.b);
+  if (pa.length && pb.length) {
+    const x = pa[0][0].text.trim(), y = pb[0][0].text.trim();
+    if (x === y) {
+      root.append(h(`<p class="cmp-note">Both sessions start from the same prompt.</p>`));
+    } else {
+      const words = (s) => s.split(/(\s+)/).filter(Boolean);
+      const html = wordDiffHTML(seqDiff(words(x), words(y)));
+      const box = h(`<div class="cmp-wdiff"><div class="cmp-wdiff-head">How the first prompt changed from A to B</div><div class="cmp-wdiff-body"></div></div>`);
+      $(".cmp-wdiff-body", box).innerHTML = html;
+      root.append(box);
+    }
+  }
+  cols(root, (col, k, t) => {
+    const list = prompts(t);
+    if (!list.length) { col.append(h(`<div class="cmp-empty">No prompts recorded.</div>`)); return; }
+    const ol = h(`<ol class="cmp-plist"></ol>`);
+    for (const [e, i] of list) {
+      const li = h(`<li><button class="cmp-prompt" title="Open this step">${esc(oneLine(e.text, 400))}</button></li>`);
+      $("button", li).onclick = () => openStep(t.session.key, i);
+      ol.append(li);
+    }
+    col.append(ol);
+  });
+}
+
+// wordDiffHTML marks a word diff as whole runs: everything removed, then
+// everything added. A space between two changed words joins their runs, so a
+// rewritten phrase reads as one phrase and not as interleaved words.
+function wordDiffHTML(rows) {
+  let out = "", del = "", ins = "";
+  const flush = () => {
+    if (del) out += `<del>${esc(del)}</del>`;
+    if (ins) out += `<ins>${esc(ins)}</ins>`;
+    del = ins = "";
+  };
+  rows.forEach(([k, w], i) => {
+    if (k === "d") del += w;
+    else if (k === "a") ins += w;
+    else if ((del || ins) && !w.trim() && rows[i + 1] && rows[i + 1][0] !== " ") { del += w; ins += w; }
+    else { flush(); out += esc(w); }
+  });
+  flush();
+  return out;
+}
+
+function renderCompareFiles(root, files) {
+  if (!files.length) { root.append(h(`<div class="cmp-empty">Neither session changed a file.</div>`)); return; }
+  const d = cmp.data;
+  const list = h(`<div class="cmp-flist"></div>`);
+  const cell = (f) => !f ? `<span class="none">not changed</span>`
+    : f.deleted ? `<span class="minus">deleted</span>`
+    : `<span class="plus">+${f.added}</span><span class="minus">−${f.removed}</span><span class="ed">${plural(f.edits, "edit")}</span>`;
+  for (const f of files) {
+    const tag = f.a && f.b ? `<span class="tag both">Both</span>` : f.a ? `<span class="tag">Only A</span>` : `<span class="tag">Only B</span>`;
+    const slash = f.path.lastIndexOf("/");
+    const row = h(`<div class="cmp-file" aria-expanded="${cmp.open.has(f.path)}">
+      <button class="cmp-frow" title="${esc(f.path)}">${svg("down", "chev")}<span class="fp"><span class="dir">${esc(slash >= 0 ? f.path.slice(0, slash + 1) : "")}</span>${esc(f.path.slice(slash + 1))}</span>${tag}
+        <span class="cmp-fcell a">${sideMark("a")}${cell(f.a)}</span><span class="cmp-fcell b">${sideMark("b")}${cell(f.b)}</span></button></div>`);
+    const btn = $("button", row);
+    const body = () => {
+      const box = h(`<div class="cmp-fbody"></div>`);
+      cols(box, (col, k, t) => {
+        const tally = f[k];
+        if (!tally) { col.append(h(`<div class="cmp-empty">This session didn’t change this file.</div>`)); return; }
+        for (const ci of tally.changes) {
+          const ch = t.changes[ci], df = t.diffs[ci];
+          const card = h(`<article class="change"><div class="change-head"><span class="op ${esc(ch.op)}">${esc(OPS[ch.op] || ch.op)}</span>${ch.op === "delete" ? "" : `<span class="nums mono">${counts(df)}</span>`}
+            <button class="jump" title="Open the step that made this change">Show step</button></div></article>`);
+          $(".jump", card).onclick = () => openStep(t.session.key, ch.event);
+          if (ch.op === "delete") card.append(h(`<div class="note">The agent deleted this file.</div>`));
+          else if (!df.hunks.length || df.hunks.every((r) => !r.length)) card.append(h(`<div class="note">No content recorded for this change.</div>`));
+          for (const rows of df.hunks) {
+            const hk = h(`<div class="hunk"></div>`);
+            hk.append(renderDiffRows(rows, 200));
+            card.append(hk);
+          }
+          col.append(card);
+        }
+      });
+      return box;
+    };
+    if (cmp.open.has(f.path)) row.append(body());
+    btn.onclick = () => {
+      const open = !cmp.open.has(f.path);
+      open ? cmp.open.add(f.path) : cmp.open.delete(f.path);
+      row.setAttribute("aria-expanded", open);
+      if (open) row.append(body()); else $(".cmp-fbody", row)?.remove();
+    };
+    list.append(row);
+  }
+  root.append(list);
+  if (files.some((f) => f.a && f.b)) root.append(h(`<p class="cmp-note">Open a file to read each session’s edits to it side by side.</p>`));
+}
+
+function renderCompareTools(root, c) {
+  const names = new Map();
+  for (const k of SIDES) for (const t of c[k].tools) {
+    if (!names.has(t.name)) names.set(t.name, { a: null, b: null });
+    names.get(t.name)[k] = t;
+  }
+  if (!names.size) { root.append(h(`<div class="cmp-empty">Neither session called a tool.</div>`)); return; }
+  const rows = [...names].sort((x, y) => ((y[1].a?.calls || 0) + (y[1].b?.calls || 0)) - ((x[1].a?.calls || 0) + (x[1].b?.calls || 0)) || (x[0] < y[0] ? -1 : 1));
+  const top = Math.max(...rows.flatMap(([, v]) => [v.a?.calls || 0, v.b?.calls || 0])) || 1;
+  const t = h(`<table class="cmp-table tools"><thead><tr><th>Tool</th><th>${sideMark("a")}</th><th>${sideMark("b")}</th></tr></thead><tbody></tbody></table>`);
+  const cell = (x, k) => {
+    const n = x?.calls || 0;
+    return `<td class="v"><span class="num">${n || "·"}${x?.failed ? ` <span class="bad">${x.failed} failed</span>` : ""}</span><span class="bar ${k}" style="width:${(100 * n) / top}%"></span></td>`;
+  };
+  for (const [name, v] of rows) {
+    $("tbody", t).append(h(`<tr><th scope="row"><span class="tool-name">${svg(toolIcon(name), "ic")}${esc(name)}</span></th>${cell(v.a, "a")}${cell(v.b, "b")}</tr>`));
+  }
+  root.append(t);
+}
+
+function renderCompareFails(root) {
+  cols(root, (col, k, t) => {
+    const fails = t.events.map((e, i) => [e, i]).filter(([e]) => e.kind === "tool" && e.error);
+    if (!fails.length) { col.append(h(`<div class="cmp-empty">No failed tool calls.</div>`)); return; }
+    for (const [e, i] of fails) {
+      const out = (e.output || "").split("\n").find((l) => l.trim()) || "";
+      const b = h(`<button class="cmp-fail" title="Open this step">${svg(toolIcon(e.tool), "ic")}<span class="tn">${esc(e.tool)}</span><span class="ts">${esc(e.summary || "")}</span>
+        ${out ? `<span class="out">${esc(oneLine(out, 200))}</span>` : ""}</button>`);
+      b.onclick = () => openStep(t.session.key, i);
+      col.append(b);
+    }
+  });
+}
+
 /* ---------------- palette ---------------- */
 const palette = { items: [], sel: 0, hits: null, seq: 0, timer: 0 };
 
@@ -1254,6 +1710,15 @@ function closePalette() { $("#palette").hidden = true; clearTimeout(palette.time
 
 /* ---------------- routing & refresh ---------------- */
 function route() {
+  const c = compareRoute();
+  if (c) {
+    stopLive();
+    state.current = null;
+    renderSidebar();
+    openCompare(c.a, c.b);
+    return;
+  }
+  cmp.seq++;
   const m = location.hash.match(/^#s=(.+)$/);
   const key = m ? decodeURIComponent(m[1]) : null;
   if (key && state.data.sessions.some((s) => s.key === key)) {
@@ -1301,7 +1766,7 @@ async function init() {
   if (!state.data) return;
   route();
   window.addEventListener("hashchange", route);
-  $("#refresh").onclick = async () => { await load(true); if (!state.current) renderHome(); };
+  $("#refresh").onclick = async () => { await load(true); if (!state.current && !onCompare()) renderHome(); };
   $("#q").addEventListener("input", (e) => { state.q = e.target.value; renderSidebar(); });
   $("#q").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.target.value = ""; state.q = ""; renderSidebar(); e.target.blur(); } });
   $("#q").addEventListener("focus", () => ($("#q-hint").hidden = true));
@@ -1339,7 +1804,7 @@ async function init() {
   setInterval(async () => {
     if (document.hidden) return;
     const changed = await load();
-    if (changed && !state.current) renderHome();
+    if (changed && !state.current && !onCompare()) renderHome();
     if (changed) startLive();
   }, 20000);
 }

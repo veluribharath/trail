@@ -53,6 +53,7 @@ func main() {
 	showPrices := flag.Bool("prices", false, "print the token prices used for API-equivalent costs and exit")
 	export := flag.String("export", "", "write one session (id, provider:id, or id prefix) as a single offline HTML file and exit")
 	out := flag.String("o", "", "file for -export to write; without it the page goes to standard output")
+	compare := flag.String("compare", "", "compare two sessions: trail -compare A B, each an id, provider:id, or id prefix; prints a table and exits")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -90,6 +91,17 @@ func main() {
 
 	if *list {
 		printList(idx)
+		return
+	}
+	if *compare != "" {
+		if flag.NArg() != 1 {
+			fmt.Fprintln(os.Stderr, "trail: -compare takes two sessions: trail -compare A B")
+			os.Exit(2)
+		}
+		if err := compareSessions(idx, os.Stdout, *compare, flag.Arg(0)); err != nil {
+			fmt.Fprintln(os.Stderr, "trail:", err)
+			os.Exit(1)
+		}
 		return
 	}
 	if *export != "" {
