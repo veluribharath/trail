@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -20,7 +22,7 @@ func TestClaudeParse(t *testing.T) {
 	}
 	c1 := filepath.Join("testdata/claude/projects/-work-shop/c1.jsonl")
 	paths = []string{c1}
-	tr, err := p.Parse(paths[0], true)
+	tr, err := parseFile(p, paths[0], true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +60,7 @@ func TestClaudeParse(t *testing.T) {
 	}
 
 	// Summary mode must agree with full mode on the counts the tree shows.
-	sum, _ := p.Parse(paths[0], false)
+	sum, _ := parseFile(p, paths[0], false)
 	if sum.Session.Edits != s.Edits || sum.Session.Messages != s.Messages || len(sum.Events) != 0 {
 		t.Errorf("summary parse disagrees: %+v", sum.Session)
 	}
@@ -75,7 +77,7 @@ func TestSessionNames(t *testing.T) {
 		"c3": {"Add dark mode toggle", "generated"},
 	}
 	for id, want := range cases {
-		tr, err := cl.Parse("testdata/claude/projects/-work-shop/"+id+".jsonl", false)
+		tr, err := parseFile(cl, "testdata/claude/projects/-work-shop/"+id+".jsonl", false)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,7 +131,7 @@ func TestCodexParse(t *testing.T) {
 	}
 	var cur, legacy *Transcript
 	for _, path := range paths {
-		tr, err := p.Parse(path, true)
+		tr, err := parseFile(p, path, true)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -293,5 +295,106 @@ func getJSON(t *testing.T, url string, v any) {
 	defer resp.Body.Close()
 	if err := json.NewDecoder(resp.Body).Decode(v); err != nil {
 		t.Fatalf("%s: %v", url, err)
+	}
+}
+
+func TestReadComplete(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	for _, c := range []struct{ in, want string }{
+		{`{"a":1}` + "\n" + `{"b":`, `{"a":1}` + "\n"},               // line still being written
+		{`{"a":1}` + "\n" + `{"b":2}`, `{"a":1}` + "\n" + `{"b":2}`}, // complete, no final newline
+		{`{"a":`, ``},
+	} {
+		os.WriteFile(path, []byte(c.in), 0o600)
+		if got, _ := readComplete(path); string(got) != c.want {
+			t.Errorf("readComplete(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestLiveTail(t *testing.T) {
+	defer func(p, i time.Duration) { livePoll, liveIdle = p, i }(livePoll, liveIdle)
+	livePoll, liveIdle = 10*time.Millisecond, time.Minute
+
+	src, _ := os.ReadFile("testdata/claude/projects/-work-shop/c1.jsonl")
+	lines := strings.SplitAfter(string(src), "\n")
+	dir := t.TempDir()
+	path := filepath.Join(dir, "projects", "-work-shop", "c1.jsonl")
+	os.MkdirAll(filepath.Dir(path), 0o700)
+	os.WriteFile(path, []byte(strings.Join(lines[:4], "")), 0o600)
+
+	idx := NewIndex(&claudeProvider{dir: dir})
+	idx.Scan(0)
+	srv := httptest.NewServer((&Server{index: idx}).Handler())
+	defer srv.Close()
+	before, err := idx.Load("claude:c1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	stream := func(size int64) (func() (string, liveUpdate), func()) {
+		resp, err := http.Get(fmt.Sprintf("%s/api/live?id=claude:c1&size=%d", srv.URL, size))
+		if err != nil || resp.Header.Get("Content-Type") != "text/event-stream" {
+			t.Fatalf("live stream: %v %v", err, resp.Header)
+		}
+		rd := bufio.NewReader(resp.Body)
+		next := func() (string, liveUpdate) {
+			var event string
+			var u liveUpdate
+			for {
+				ln, err := rd.ReadString('\n')
+				if err != nil {
+					t.Fatalf("stream ended: %v", err)
+				}
+				switch {
+				case strings.HasPrefix(ln, "event: "):
+					event = strings.TrimSpace(ln[7:])
+				case strings.HasPrefix(ln, "data: "):
+					json.Unmarshal([]byte(ln[6:]), &u)
+				case ln == "\n":
+					return event, u
+				}
+			}
+		}
+		return next, func() { resp.Body.Close() }
+	}
+
+	next, stop := stream(before.Size)
+	defer stop()
+	if ev, _ := next(); ev != "ready" {
+		t.Fatalf("an up-to-date viewer should get ready first, got %q", ev)
+	}
+
+	// Half a line: the agent is mid-write, so nothing is sent for it.
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	half := len(lines[4]) / 2
+	f.WriteString(lines[4][:half])
+	time.Sleep(50 * time.Millisecond)
+	// The rest of the line carries tool results for calls already shown, so
+	// the update reaches back to rewrite those events.
+	f.WriteString(lines[4][half:])
+	f.Close()
+	ev, u := next()
+	if ev != "update" || u.From >= len(before.Events) || u.Size != int64(len(strings.Join(lines[:5], ""))) {
+		t.Fatalf("update after a whole line: %q from=%d size=%d", ev, u.From, u.Size)
+	}
+	var failed bool
+	for _, e := range u.Events {
+		failed = failed || (e.Tool == "Bash" && e.Error)
+	}
+	if !failed {
+		t.Errorf("tool result should be attached to its earlier call: %+v", u.Events)
+	}
+
+	// A viewer whose copy is stale gets the whole transcript once.
+	next2, stop2 := stream(1)
+	defer stop2()
+	if ev, u := next2(); ev != "update" || u.From != 0 || u.ChangesFrom != 0 || len(u.Changes) == 0 {
+		t.Errorf("stale viewer: %q from=%d changes=%d", ev, u.From, len(u.Changes))
+	}
+
+	os.Remove(path)
+	if ev, _ := next(); ev != "gone" {
+		t.Errorf("deleted session: got %q, want gone", ev)
 	}
 }

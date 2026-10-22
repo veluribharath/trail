@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -109,7 +111,7 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 			go func() {
 				defer wg.Done()
 				for j := range ch {
-					t, err := j.p.Parse(j.path, false)
+					t, err := parseFile(j.p, j.path, false)
 					if err != nil && (t == nil || t.Session.Messages == 0) {
 						continue
 					}
@@ -209,8 +211,13 @@ func (x *Index) Load(key string) (*Transcript, error) {
 	}
 	for _, p := range x.providers {
 		if p.Name() == s.Provider {
-			t, err := p.Parse(s.Path, true)
+			b, err := readComplete(s.Path)
+			if err != nil {
+				return nil, err
+			}
+			t, err := p.Parse(bytes.NewReader(b), s.Path, true)
 			if t != nil {
+				t.Size = int64(len(b))
 				t.Session.Key, t.Session.Root, t.Session.Worktree = s.Key, s.Root, s.Worktree
 				if n, ok := p.(sessionNamer); ok {
 					t.Session.applyName(n.SessionNames()[t.Session.ID])
@@ -260,4 +267,29 @@ func (x *Index) repoRoot(cwd string) (root, worktree string) {
 	x.roots[cwd] = [2]string{root, worktree}
 	x.rootsMu.Unlock()
 	return root, worktree
+}
+
+// parseFile parses one session file, for the index's summaries.
+func parseFile(p Provider, path string, full bool) (*Transcript, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return p.Parse(f, path, full)
+}
+
+// readComplete reads a session file's complete lines. The agents append one
+// JSON line per write, so text after the last newline that isn't valid JSON
+// yet is a line still being written; it is left for the next read. The file is
+// closed before returning, so trail never holds it open while the agent works.
+func readComplete(path string) ([]byte, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if end := bytes.LastIndexByte(b, '\n') + 1; end < len(b) && !json.Valid(b[end:]) {
+		b = b[:end]
+	}
+	return b, nil
 }

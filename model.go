@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"path/filepath"
 	"strings"
 	"time"
@@ -15,9 +16,10 @@ type Provider interface {
 	Root() string
 	// Discover lists session files. A missing root is not an error.
 	Discover() ([]string, error)
-	// Parse reads one session file. When full is false only the summary
-	// fields are needed, so adapters may skip building events.
-	Parse(path string, full bool) (*Transcript, error)
+	// Parse reads one session file's contents from r; path is the file it
+	// came from. When full is false only the summary fields are needed, so
+	// adapters may skip building events.
+	Parse(r io.Reader, path string, full bool) (*Transcript, error)
 }
 
 // sessionNamer is implemented by providers that keep session names outside
@@ -62,6 +64,9 @@ type Transcript struct {
 	Session *Session     `json:"session"`
 	Events  []Event      `json:"events"`
 	Changes []FileChange `json:"changes"`
+	// Size is how many bytes of the session file were read: every complete
+	// line at the time. Live updates continue from it.
+	Size int64 `json:"size"`
 }
 
 // Event is one entry in the transcript.

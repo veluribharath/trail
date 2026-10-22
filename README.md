@@ -57,6 +57,8 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | Claude Code | `~/.claude/projects/<folder>/<id>.jsonl` | `Edit`, `MultiEdit`, `Write` |
 | Codex | `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl` (current and legacy formats) | `apply_patch`, direct or through the shell tool |
 
+A session the agent wrote to in the last 10 minutes opens live: new steps appear as the agent works, marked Live in the header. Following a session can't interrupt it. Both agents only append whole lines to the session file, so trail checks the file's size about once a second and, when it grows, reads the complete lines and closes the file again. It never holds the file open or touches the agents' lock files.
+
 Sessions are filed under their git repository. A session that ran in a linked worktree is filed under the main repository and labelled with the worktree. Folders that aren't repositories are filed as themselves.
 
 ## How diffs and commits are matched
@@ -75,6 +77,7 @@ codex.go     Codex adapter and apply_patch parser
 index.go     discovery, mtime cache, repo-root grouping
 git.go       commits in the session window
 server.go    JSON API and embedded UI
+live.go      live updates for a session that is still being written
 web/         index.html, style.css, app.js (no build step)
 ```
 
@@ -85,7 +88,6 @@ Adding an agent means implementing `Provider` (four methods) and registering it 
 - OpenCode (SQLite storage), Gemini CLI, Kiro, pi
 - Renaming sessions from trail (names are read from Claude Code and Codex, never written)
 - Full-text search across transcripts (the filter covers titles, first prompts, folders and branches)
-- Live tailing of a running session
 
 ## Contributing
 
