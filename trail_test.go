@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -348,6 +349,51 @@ func TestSearch(t *testing.T) {
 	s2.Sync()
 	if n := len(s2.Run(ParseQuery("giraffes "), "", 10).Sessions); n != 0 || s2.docs != 0 || s2.totalLen != 0 {
 		t.Errorf("removed session should leave nothing: %d docs=%d", n, s2.docs)
+	}
+}
+
+// A step's words can be split across its fields, and a finished word is
+// never crowded out of the prefix expansion by longer, commoner words.
+func TestSearchStepAndPrefix(t *testing.T) {
+	dir := t.TempDir()
+	proj := filepath.Join(dir, "projects", "-tmp")
+	os.MkdirAll(proj, 0o755)
+	var many []string
+	for i := range maxPrefixTerms + 10 {
+		many = append(many, fmt.Sprintf("zeb%c%c", 'a'+i/26, 'a'+i%26))
+	}
+	head := `{"cwd":"/tmp","sessionId":"x2","timestamp":"2026-10-01T10:00:00Z",`
+	lines := []string{
+		head + `"type":"user","message":{"role":"user","content":"zeb lonely"}}`,
+		head + `"type":"user","message":{"role":"user","content":"` + strings.Join(many, " ") + `"}}`,
+		head + `"type":"user","message":{"role":"user","content":"` + strings.Join(many, " ") + `"}}`,
+		head + `"type":"assistant","message":{"role":"assistant","content":[{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"npm install"}}]}}`,
+		head + `"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"permission denied EACCES","is_error":true}]}}`,
+	}
+	os.WriteFile(filepath.Join(proj, "x2.jsonl"), []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	idx := NewIndex(&claudeProvider{dir: dir})
+	idx.Scan(0)
+	s := NewSearch(idx)
+	s.Sync()
+
+	events := func(q string) []int {
+		r := s.Run(ParseQuery(q), "", 10)
+		if len(r.Sessions) == 0 {
+			return nil
+		}
+		return r.Sessions[0].Events
+	}
+	if ev := events("npm eacces "); len(ev) != 1 {
+		t.Errorf("command and error output of one step should match together, got %v", ev)
+	}
+	if ev := events(`"npm install" eacces `); len(ev) != 1 {
+		t.Errorf("phrase in the command, word in the output: %v", ev)
+	}
+	if ev := events("in:tool npm eacces "); ev != nil {
+		t.Errorf("in:tool should leave the output out: %v", ev)
+	}
+	if ev := events("zeb"); !slices.Contains(ev, 0) {
+		t.Errorf("exact word typed as a prefix should still match its step, got %v", ev)
 	}
 }
 

@@ -72,7 +72,7 @@ Search covers prompts, replies, tool calls (commands, patterns, paths, edit cont
 | `file:cart.go` | only steps that edited a matching file |
 | `agent:codex` | only one agent's sessions |
 
-The index lives in memory and is built in the background when trail starts, re-reading only sessions that changed. Nothing is written to disk. On a generated 450 MB set of transcripts it took about 5 seconds to build, used about 160 MB, and answered in under 100 ms.
+The index lives in memory and is built in the background when trail starts, re-reading only sessions that changed. Nothing is written to disk. On a generated 450 MB set of transcripts it took about 5 seconds to build, used about 160 MB, and answered in about 100 ms.
 
 ## How diffs and commits are matched
 

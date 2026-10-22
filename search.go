@@ -632,17 +632,23 @@ func (s *Search) resolve(q Query) (slots [][]uint32, words []string) {
 	for _, slot := range q.slots {
 		if len(slot) == 2 && slot[1] == "\x00prefix" {
 			p := slot[0]
+			// The word as typed always stays in, even if it's rarer than
+			// the longer words it starts.
 			var terms []string
+			if _, ok := s.termID[p]; ok {
+				terms = append(terms, p)
+			}
+			var longer []string
 			for i := sort.SearchStrings(s.vocab, p); i < len(s.vocab) && strings.HasPrefix(s.vocab[i], p); i++ {
-				terms = append(terms, s.vocab[i])
+				if s.vocab[i] != p {
+					longer = append(longer, s.vocab[i])
+				}
 			}
-			if _, ok := s.termID[p]; ok && !slices.Contains(terms, p) {
-				terms = append(terms, p) // indexed since the vocabulary was last sorted
+			if room := maxPrefixTerms - len(terms); len(longer) > room {
+				sort.SliceStable(longer, func(a, b int) bool { return s.df[s.termID[longer[a]]] > s.df[s.termID[longer[b]]] })
+				longer = longer[:room]
 			}
-			if len(terms) > maxPrefixTerms {
-				sort.SliceStable(terms, func(a, b int) bool { return s.df[s.termID[terms[a]]] > s.df[s.termID[terms[b]]] })
-				terms = terms[:maxPrefixTerms]
-			}
+			terms = append(terms, longer...)
 			var ids []uint32
 			for _, t := range terms {
 				if id, ok := s.termID[t]; ok && s.df[id] > 0 {
@@ -665,33 +671,51 @@ func (s *Search) resolve(q Query) (slots [][]uint32, words []string) {
 	return slots, words
 }
 
-// matchSession scores every step field that has a term from each slot, with
-// BM25. Callers hold s.mu for reading.
+// matchSession scores every step that has a term from each slot, with
+// BM25. A step's fields (a tool call's input and its error output, say) count
+// together, so one word can be in the command and another in the error. Each
+// hit keeps the field that scored best, for its snippet. Callers hold s.mu
+// for reading.
 func matchSession(ss *searchSession, q Query, slots [][]uint32, idf map[uint32]float64, avg float64) []scored {
 	const k1, b = 1.2, 0.75
-	var acc map[int32]float64
+	type step struct {
+		total, slot float64 // score over the slots so far, and in this slot
+		doc         int32   // best-scoring field
+		docScore    float64
+	}
+	var acc map[int32]step
 	for _, slot := range slots {
-		cur := map[int32]float64{}
+		cur := map[int32]step{}
 		for _, id := range slot {
 			for _, p := range ss.postings(id) {
 				doc, tf := int32(p>>8&0xFFFFFF), float64(p&0xFF)
-				if acc != nil {
-					if _, ok := acc[doc]; !ok {
-						continue
-					}
-				}
 				d := &ss.docs[doc]
 				if d.field&q.fields == 0 {
 					continue
 				}
-				sc := idf[id] * tf * (k1 + 1) / (tf + k1*(1-b+b*float64(d.n)/avg))
-				cur[doc] = max(cur[doc], sc)
+				prev, ok := acc[d.event]
+				if acc != nil && !ok {
+					continue
+				}
+				sc := fieldBoost[d.field] * idf[id] * tf * (k1 + 1) / (tf + k1*(1-b+b*float64(d.n)/avg))
+				c, seen := cur[d.event]
+				if !seen {
+					c = step{total: prev.total, doc: prev.doc, docScore: prev.docScore}
+					if acc == nil {
+						c.doc, c.docScore = doc, -1
+					}
+				}
+				c.slot = max(c.slot, sc)
+				if sc > c.docScore {
+					c.doc, c.docScore = doc, sc
+				}
+				cur[d.event] = c
 			}
 		}
-		if acc != nil {
-			for d, v := range cur {
-				cur[d] = v + acc[d]
-			}
+		for ev, c := range cur {
+			c.total += c.slot
+			c.slot = 0
+			cur[ev] = c
 		}
 		acc = cur
 		if len(acc) == 0 {
@@ -699,15 +723,14 @@ func matchSession(ss *searchSession, q Query, slots [][]uint32, idf map[uint32]f
 		}
 	}
 	var out []scored
-	for di, sc := range acc {
-		d := &ss.docs[di]
-		if q.tool != "" && strings.ToLower(d.tool) != q.tool {
+	for ev, c := range acc {
+		if q.tool != "" && strings.ToLower(ss.docs[c.doc].tool) != q.tool {
 			continue
 		}
-		if q.file != "" && !slices.ContainsFunc(ss.edits[d.event], func(f string) bool { return strings.Contains(f, q.file) }) {
+		if q.file != "" && !slices.ContainsFunc(ss.edits[ev], func(f string) bool { return strings.Contains(f, q.file) }) {
 			continue
 		}
-		out = append(out, scored{di, sc * fieldBoost[d.field]})
+		out = append(out, scored{c.doc, c.total})
 	}
 	return out
 }
@@ -724,16 +747,18 @@ func (s *Search) finish(c candidate, q Query, words []string) *SessionHits {
 		f  field
 	}
 	text := map[at]string{}
-	eachDoc(t, func(ev int, f field, _, s string) { text[at{ev, f}] = s })
+	step := map[int][]string{} // every field of a step, for phrase checks
+	eachDoc(t, func(ev int, f field, _, s string) {
+		text[at{ev, f}] = s
+		if f&q.fields != 0 {
+			step[ev] = append(step[ev], strings.ToLower(strings.Join(strings.Fields(s), " ")))
+		}
+	})
 
 	hits := c.hits[:0:0]
 	for _, h := range c.hits {
-		d := c.ss.docs[h.doc]
-		if len(q.phrases) > 0 {
-			low := strings.ToLower(strings.Join(strings.Fields(text[at{int(d.event), d.field}]), " "))
-			if !allIn(low, q.phrases) {
-				continue
-			}
+		if len(q.phrases) > 0 && !phrasesIn(step[int(c.ss.docs[h.doc].event)], q.phrases) {
+			continue
 		}
 		hits = append(hits, h)
 	}
@@ -772,9 +797,10 @@ func (s *Search) finish(c candidate, q Query, words []string) *SessionHits {
 	return sh
 }
 
-func allIn(s string, subs []string) bool {
-	for _, sub := range subs {
-		if !strings.Contains(s, sub) {
+// phrasesIn reports whether each phrase is inside one of a step's fields.
+func phrasesIn(fields []string, phrases []string) bool {
+	for _, ph := range phrases {
+		if !slices.ContainsFunc(fields, func(f string) bool { return strings.Contains(f, ph) }) {
 			return false
 		}
 	}
