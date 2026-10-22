@@ -34,6 +34,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/search", s.handleSearch)
 	mux.HandleFunc("GET /api/export", s.handleExport)
 	mux.HandleFunc("GET /api/blame", s.handleBlame)
+	mux.HandleFunc("GET /api/stats", s.handleStats)
 	sub, _ := fs.Sub(webFS, "web")
 	mux.Handle("GET /", noCache(http.FileServer(http.FS(sub))))
 	return securityHeaders(mux)
@@ -101,6 +102,31 @@ func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", `attachment; filename="`+exportName(t.Session)+`"`)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Write(b.Bytes())
+}
+
+// handleStats aggregates sessions by project, file, tool and agent. Tool and
+// file numbers come from the search index, so while it is still reading
+// transcripts the result says how far it got, and the page asks again.
+func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
+	s.index.Scan(5 * time.Second)
+	s.search.Kick()
+	writeJSON(w, s.stats(r.URL.Query().Get("days"), r.URL.Query().Get("root"), r.URL.Query().Get("agents")))
+}
+
+// stats answers for the last days days ("" or "all" for everything).
+func (s *Server) stats(days, root, agents string) *Stats {
+	q := StatsQuery{Root: root, Agents: parseAgents(agents), To: time.Now()}
+	if n, err := strconv.Atoi(days); err == nil && n > 0 {
+		q.From = bucketStart(q.To.AddDate(0, 0, -n+1), "day")
+	}
+	per, total, pending := s.search.sessionStats()
+	st := BuildStats(s.index.Sessions(), per, q)
+	st.Total, st.Read = total, total-pending
+	if total == 0 {
+		// The first sync hasn't started counting yet.
+		st.Total, st.Read = len(s.index.files()), 0
+	}
+	return st
 }
 
 func (s *Server) handleCommits(w http.ResponseWriter, r *http.Request) {

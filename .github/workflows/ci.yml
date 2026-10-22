@@ -24,5 +24,17 @@ jobs:
         run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
       - run: go vet ./...
       - run: go test -race ./...
+        env:
+          TRAIL_UI_TEST: "1" # the runners have Chrome; fail rather than skip the UI smoke test
+      - name: Fuzz briefly
+        if: runner.os == 'Linux'
+        run: make fuzz FUZZTIME=20s
+      - name: Keep the failing fuzz input
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-failure
+          path: testdata/fuzz
+          if-no-files-found: ignore
       - name: Build
         run: CGO_ENABLED=0 go build -trimpath -o trail .
