@@ -50,6 +50,7 @@ function setUsagePref(tokens) {
   try { localStorage.setItem("trail.usage", tokens ? "tokens" : "cost"); } catch {}
   if (!EXPORTED) renderSidebar();
   if (state.transcript && state.current) renderSession();
+  if (!EXPORTED && onStats() && dash.data) renderStats();
 }
 function fmtTokens(n) {
   n = n || 0;
@@ -239,6 +240,7 @@ function renderProviders() {
     b.onclick = () => {
       state.hidden.has(p.name) ? state.hidden.delete(p.name) : state.hidden.add(p.name);
       renderSidebar();
+      if (onStats()) loadStats();
     };
     el.append(b);
   }
@@ -335,7 +337,7 @@ function renderHome() {
   } else {
     view.append(h(`<div class="home"><div class="home-inner">
       <h1>${plural(d.sessions.length, "session")} across ${plural(folders, "folder")}</h1>
-      <p class="lede">${lastDay ? `${plural(lastDay, "session")} ran in the last day. ` : ""}Open one to read what the agent did next to every file it changed.</p>
+      <p class="lede">${lastDay ? `${plural(lastDay, "session")} ran in the last day. ` : ""}Open one to read what the agent did next to every file it changed, or see <a class="lede-link" href="#stats">stats across every project</a>.</p>
       <h2>Pick up where you left off</h2><div class="recent"></div>
       <h2>Where trail looks</h2><div class="sources"></div></div></div>`));
     const recent = $(".recent", view);
@@ -1252,8 +1254,427 @@ function openPalette(q = "") {
 }
 function closePalette() { $("#palette").hidden = true; clearTimeout(palette.timer); palette.seq++; }
 
+/* ---------------- stats ---------------- */
+const RANGES = [["7", "7 days"], ["30", "30 days"], ["90", "90 days"], ["365", "1 year"], ["all", "All time"]];
+const NAMED_PROJECTS = 5; // the rest of the stack folds into Other
+const FEW_CALLS = 20; // below this a tool's failure rate is drawn faded
+const dash = { days: "90", root: "", data: null, seq: 0, timer: 0, table: new Set(), colors: new Map(), ro: null };
+
+const compact = (n) => (n >= 1e6 ? (n / 1e6).toFixed(n >= 1e7 ? 0 : 1) + "M" : n >= 1e4 ? Math.round(n / 1e3) + "K" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(n)).replace(".0", "");
+const rate = (n, of) => (of ? (100 * n / of).toFixed(1).replace(/\.0$/, "") + "%" : "—");
+const baseName = (p) => (p === "(unknown)" ? p : p.split("/").filter(Boolean).pop() || p);
+
+function statsQuery() {
+  const p = new URLSearchParams({ days: dash.days });
+  if (dash.root) p.set("root", dash.root);
+  const shown = state.data.providers.filter((x) => !state.hidden.has(x.name)).map((x) => x.name);
+  if (shown.length < state.data.providers.length) p.set("agents", shown.join(",") || "-");
+  return p.toString();
+}
+
+function openStats() {
+  stopLive();
+  state.current = null;
+  renderSidebar();
+  const m = location.hash.match(/^#stats\??(.*)$/);
+  const p = new URLSearchParams(m ? m[1] : "");
+  if (RANGES.some(([v]) => v === p.get("days"))) dash.days = p.get("days");
+  dash.root = p.get("root") || "";
+  loadStats();
+}
+
+function statsHash() {
+  const p = new URLSearchParams({ days: dash.days });
+  if (dash.root) p.set("root", dash.root);
+  return "#stats?" + p;
+}
+
+async function loadStats() {
+  const seq = ++dash.seq;
+  clearTimeout(dash.timer);
+  if (!$(".stats", $("#view"))) renderStatsShell();
+  $(".stats-body")?.classList.add("stale");
+  try {
+    const d = await api("/api/stats?" + statsQuery());
+    if (seq !== dash.seq) return;
+    dash.data = d;
+    renderStats();
+    // Tool and file numbers come from reading whole transcripts, which
+    // happens in the background after trail starts.
+    if (d.read < d.total) dash.timer = setTimeout(() => location.hash.startsWith("#stats") && loadStats(), 1200);
+  } catch (e) {
+    if (seq === dash.seq) $(".stats-body").innerHTML = `<div class="empty-pane"><strong>Couldn’t load stats</strong>${esc(e.message)}</div>`;
+  }
+}
+
+function renderStatsShell() {
+  const view = $("#view");
+  view.innerHTML = "";
+  const roots = [...new Set(state.data.sessions.map((s) => s.root))].sort((a, b) => tildify(a).localeCompare(tildify(b)));
+  if (dash.root && !roots.includes(dash.root)) roots.unshift(dash.root);
+  const page = h(`<div class="stats"><div class="stats-inner">
+    <header class="stats-head"><h1>Stats</h1>
+      <div class="stats-filters">
+        <div class="seg" role="group" aria-label="Time range">${RANGES.map(([v, l]) => `<button data-days="${v}" aria-pressed="${v === dash.days}">${l}</button>`).join("")}</div>
+        <select class="select" aria-label="Project"><option value="">All projects</option>${roots.map((r) => `<option value="${esc(r)}" ${r === dash.root ? "selected" : ""}>${esc(tildify(r))}</option>`).join("")}</select>
+        <span class="stats-agents"></span>
+      </div>
+    </header>
+    <div class="stats-body"></div></div></div>`);
+  for (const b of $$(".seg button", page)) b.onclick = () => { dash.days = b.dataset.days; history.replaceState(null, "", statsHash()); syncFilters(); loadStats(); };
+  $("select", page).onchange = (e) => { dash.root = e.target.value; history.replaceState(null, "", statsHash()); loadStats(); };
+  view.append(page);
+  syncFilters();
+}
+
+function syncFilters() {
+  for (const b of $$(".stats .seg button")) b.setAttribute("aria-pressed", b.dataset.days === dash.days);
+  const sel = $(".stats select");
+  if (sel) sel.value = dash.root;
+  const hidden = state.data.providers.filter((p) => state.hidden.has(p.name));
+  const note = $(".stats-agents");
+  if (note) note.textContent = hidden.length ? `Leaving out ${hidden.map((p) => PROVIDERS[p.name] || p.name).join(", ")} (set in the sidebar)` : "";
+}
+
+// projectColors gives each named project a palette slot. A project keeps its
+// slot while it stays on screen, so changing the range doesn't repaint it.
+function projectColors(roots) {
+  const out = new Map(), used = new Set();
+  for (const r of roots) {
+    const c = dash.colors.get(r);
+    if (c && !used.has(c)) { out.set(r, c); used.add(c); }
+  }
+  for (const r of roots) {
+    if (out.has(r)) continue;
+    let c = 1;
+    while (used.has(c)) c++;
+    out.set(r, c); used.add(c);
+  }
+  for (const [r, c] of out) dash.colors.set(r, c);
+  return out;
+}
+
+function bucketLabel(iso, bucket, long = false) {
+  const d = new Date(iso);
+  if (bucket === "month") return d.toLocaleDateString(undefined, { month: long ? "long" : "short", year: "numeric" });
+  const day = d.toLocaleDateString(undefined, { month: "short", day: "numeric", ...(long ? { year: "numeric" } : {}) });
+  return bucket === "week" && long ? `Week of ${day}` : day;
+}
+
+function renderStats() {
+  const d = dash.data, t = d.totals, body = $(".stats-body");
+  syncFilters();
+  hideTip();
+  body.classList.remove("stale");
+  body.innerHTML = "";
+  dash.ro?.disconnect();
+  if (!t.sessions) {
+    const ways = ["pick a longer range", dash.root && "another project", state.hidden.size && "turn an agent back on in the sidebar"].filter(Boolean);
+    const say = ways.length > 1 ? ways.slice(0, -1).join(", ") + " or " + ways.at(-1) : ways[0];
+    body.append(h(`<div class="empty-pane"><strong>No sessions in this range</strong>${esc(say[0].toUpperCase() + say.slice(1))}.</div>`));
+    return;
+  }
+  const reading = d.read < d.total;
+  if (reading) body.append(h(`<p class="stats-note">Reading transcripts: ${d.read} of ${d.total}. Tool calls and files fill in as they are read.</p>`));
+
+  const per = { day: "day", week: "week", month: "month" }[d.bucket];
+  const u = t.usage;
+  body.append(h(`<div class="tiles">
+    <div class="tile"><span class="label">Sessions</span><span class="value">${compact(t.sessions)}</span><span class="sub">${u ? `in ${plural(t.projects, "project")}, ` : ""}on ${plural(t.activeDays, "day")}</span></div>
+    ${u ? "" : `<div class="tile"><span class="label">Projects</span><span class="value">${compact(t.projects)}</span><span class="sub">${plural(d.agents.length, "agent")}</span></div>`}
+    <div class="tile"><span class="label">Edits</span><span class="value">${compact(t.edits)}</span><span class="sub">to ${plural(t.files, "file")}</span></div>
+    <div class="tile"><span class="label">Failed tool calls</span><span class="value">${rate(t.failed, t.tools)}</span><span class="sub">${compact(t.failed)} of ${plural(t.tools, "call")}</span></div>
+    ${u ? `<div class="tile" title="${esc(usageLines(u))}"><span class="label">${usagePref.tokens ? "Tokens" : "API-equivalent cost"}</span><span class="value">${esc(usagePref.tokens ? fmtTokens(totalTokens(u)) : costLabel(u))}</span><span class="sub">${esc(usagePref.tokens ? costLabel(u) + " API-equivalent" : fmtTokens(totalTokens(u)) + " tokens")}</span></div>` : ""}
+  </div>`));
+
+  // Sessions over time, stacked by project.
+  const named = d.projects.slice(0, NAMED_PROJECTS).map((p) => p.root);
+  const colors = projectColors(named);
+  const series = [...named.map((r) => ({ key: r, name: baseName(r), title: tildify(r), cls: `s${colors.get(r)}` }))];
+  const otherRoots = d.projects.length > named.length;
+  if (otherRoots) series.push({ key: "", name: `Other (${d.projects.length - named.length})`, title: "Every other project", cls: "other" });
+  const rows = d.series.map((b) => {
+    const vals = named.map((r) => b.byRoot[r] || 0);
+    if (otherRoots) vals.push(Object.entries(b.byRoot).reduce((n, [r, v]) => (named.includes(r) ? n : n + v), 0));
+    return { label: bucketLabel(b.start, d.bucket), long: bucketLabel(b.start, d.bucket, true), vals, total: vals.reduce((a, v) => a + v, 0) };
+  });
+  const sessCard = card("sessions", `Sessions per ${per}`, series.length > 1 ? legend(series) : `<p class="card-sub">${esc(series[0].title)}</p>`);
+  body.append(sessCard);
+  const drawSessions = () => {
+    const box = $(".card-body", sessCard);
+    if (dash.table.has("sessions")) return tableView(box, [d.bucket[0].toUpperCase() + d.bucket.slice(1), ...series.map((s) => s.name), "Total"], rows.filter((r) => r.total).map((r) => [r.long, ...r.vals, r.total]));
+    stackedColumns(box, rows, series, { fmt: compact, total: (v) => plural(v, "session") });
+  };
+
+  // Tokens or API-equivalent cost over time, stacked the same way.
+  let drawUsage = () => {};
+  const usageCard = u && card("usage", `${usagePref.tokens ? "Tokens" : "API-equivalent cost"} per ${per}`,
+    `<p class="card-sub">${usagePref.tokens ? "Tokens read and written" : "What the tokens would cost at API list prices"}${u.unpriced ? "; some models have no price, so this is a floor" : ""}. <button class="linkish" data-usage>${usagePref.tokens ? "Show cost" : "Show tokens"}</button></p>`);
+  if (usageCard) {
+    body.append(usageCard);
+    $("[data-usage]", usageCard).onclick = () => setUsagePref(!usagePref.tokens);
+    const key = usagePref.tokens ? "tokensByRoot" : "costByRoot";
+    const fmt = usagePref.tokens ? fmtTokens : (v) => (v > 0 && v < 1 ? "$" + v.toFixed(2).replace(/^0/, "") : fmtCost(v).replace(/\.00$/, ""));
+    const uRows = d.series.map((b) => {
+      const by = b[key] || {};
+      const vals = named.map((r) => by[r] || 0);
+      if (otherRoots) vals.push(Object.entries(by).reduce((n, [r, v]) => (named.includes(r) ? n : n + v), 0));
+      return { label: bucketLabel(b.start, d.bucket), long: bucketLabel(b.start, d.bucket, true), vals, total: vals.reduce((a, v) => a + v, 0) };
+    });
+    const show = usagePref.tokens ? fmtTokens : fmtCost;
+    drawUsage = () => {
+      const box = $(".card-body", usageCard);
+      if (dash.table.has("usage")) return tableView(box, [d.bucket[0].toUpperCase() + d.bucket.slice(1), ...series.map((s) => s.name), "Total"], uRows.filter((r) => r.total).map((r) => [r.long, ...r.vals.map(show), show(r.total)]));
+      stackedColumns(box, uRows, series, { fmt, total: (v) => (usagePref.tokens ? fmtTokens(v) + " tokens" : fmtCost(v)), value: show });
+    };
+  }
+
+  // Failure rate over time.
+  const failRows = d.series.map((b) => ({ label: bucketLabel(b.start, d.bucket), long: bucketLabel(b.start, d.bucket, true), tools: b.tools, failed: b.failed }));
+  const failCard = card("failures", `Failed tool calls per ${per}`, `<p class="card-sub">Share of tool calls that returned an error</p>`);
+  body.append(failCard);
+  const drawFailures = () => {
+    const box = $(".card-body", failCard);
+    if (dash.table.has("failures")) return tableView(box, [d.bucket[0].toUpperCase() + d.bucket.slice(1), "Tool calls", "Failed", "Rate"], failRows.filter((r) => r.tools).map((r) => [r.long, r.tools, r.failed, rate(r.failed, r.tools)]));
+    if (!t.tools) { box.innerHTML = `<p class="card-empty">${reading ? "Still reading transcripts." : "No tool calls in this range."}</p>`; return; }
+    rateLine(box, failRows);
+  };
+
+  const pair = h(`<div class="card-pair"></div>`);
+  body.append(pair);
+
+  const multi = !dash.root && t.projects > 1;
+  const fileCard = card("files", "Most edited files", `<p class="card-sub">Edits recorded in transcripts${multi ? ", across projects" : ""}</p>`, false);
+  const maxEdits = Math.max(1, ...d.files.map((f) => f.edits));
+  $(".card-body", fileCard).append(d.files.length ? h(`<ol class="bars">${d.files.map((f) => {
+    const where = multi && !f.path.startsWith("/") ? baseName(f.root) + "/" : "";
+    return `<li title="${esc(f.path.startsWith("/") ? tildify(f.path) : tildify(f.root) + "/" + f.path)}"><span class="name"><span class="path rtl"><bdi><span class="pre">${esc(where)}</span>${esc(f.path.startsWith("/") ? tildify(f.path) : f.path)}</bdi></span></span>
+      <span class="track"><span class="fill edits" style="width:${(100 * f.edits) / maxEdits}%"></span></span>
+      <span class="val"><b>${f.edits}</b> in ${plural(f.sessions, "session")}</span></li>`;
+  }).join("")}</ol>`) : h(`<p class="card-empty">${reading ? "Still reading transcripts." : "No edits in this range."}</p>`));
+  pair.append(fileCard);
+
+  const toolCard = card("tools", "Failure rate by tool", `<p class="card-sub">The most used tools, by how often a call failed</p>`, false);
+  const maxRate = Math.max(0.0001, ...d.tools.map((r) => r.failed / r.calls));
+  $(".card-body", toolCard).append(d.tools.length ? h(`<ol class="bars">${d.tools.map((r) => `<li class="${r.calls < FEW_CALLS ? "few" : ""}" title="${esc(PROVIDERS[r.provider] || r.provider)}: ${esc(r.tool)}${r.calls < FEW_CALLS ? " (too few calls for the rate to mean much)" : ""}">
+      <span class="name"><span class="pmark ${esc(r.provider)}"></span><span class="path">${esc(r.tool)}</span></span>
+      <span class="track"><span class="fill fails" style="width:${(100 * r.failed / r.calls) / maxRate}%"></span></span>
+      <span class="val"><b>${rate(r.failed, r.calls)}</b> ${compact(r.failed)} of ${compact(r.calls)}</span></li>`).join("")}</ol>`) : h(`<p class="card-empty">${reading ? "Still reading transcripts." : "No tool calls in this range."}</p>`));
+  pair.append(toolCard);
+
+  // Projects and agents, as tables: they are the table view for the tiles.
+  if (!dash.root) {
+    const projCard = card("projects", "Projects", "", false);
+    const tb = h(`<table class="stats-table"><thead><tr><th>Project</th><th>Sessions</th><th>Edits</th><th>Failed calls</th>${u ? `<th>${usagePref.tokens ? "Tokens" : "Cost"}</th>` : ""}<th>Last session</th></tr></thead><tbody></tbody></table>`);
+    for (const p of d.projects) {
+      const c = colors.get(p.root);
+      const tr = h(`<tr tabindex="0" title="Show only ${esc(tildify(p.root))}"><td><span class="cell"><span class="key ${c ? "s" + c : "other"}"></span><span class="proj">${esc(tildify(p.root))}</span></span></td>
+        <td>${p.sessions}</td><td>${p.edits}</td><td>${rate(p.failed, p.tools)}</td>${u ? `<td>${p.usage ? esc(usageShort(p.usage)) : "—"}</td>` : ""}<td>${esc(ago(p.last))}</td></tr>`);
+      const pick = () => { dash.root = p.root; history.replaceState(null, "", statsHash()); loadStats(); $(".stats").scrollTop = 0; };
+      tr.onclick = pick;
+      tr.onkeydown = (e) => { if (e.key === "Enter") pick(); };
+      $("tbody", tb).append(tr);
+    }
+    $(".card-body", projCard).append(tb);
+    body.append(projCard);
+  }
+  const agentCard = card("agents", "Agents", "", false);
+  const ta = h(`<table class="stats-table"><thead><tr><th>Agent</th><th>Sessions</th><th>Edits</th><th>Tool calls</th><th>Failed calls</th>${u ? `<th>${usagePref.tokens ? "Tokens" : "Cost"}</th>` : ""}</tr></thead><tbody></tbody></table>`);
+  for (const a of d.agents) {
+    $("tbody", ta).append(h(`<tr><td><span class="cell"><span class="pmark ${esc(a.provider)}"></span>${esc(PROVIDERS[a.provider] || a.provider)}</span></td>
+      <td>${a.sessions}</td><td>${a.edits}</td><td>${a.tools}</td><td>${rate(a.failed, a.tools)}</td>${u ? `<td>${a.usage ? esc(usageShort(a.usage)) : "—"}</td>` : ""}</tr>`));
+  }
+  $(".card-body", agentCard).append(ta);
+  body.append(agentCard);
+
+  const draw = () => { drawSessions(); drawUsage(); drawFailures(); };
+  draw();
+  for (const [name, c, fn] of [["sessions", sessCard, drawSessions], ["usage", usageCard, drawUsage], ["failures", failCard, drawFailures]]) {
+    if (!c) continue;
+    const b = $(".card-toggle", c);
+    b.onclick = () => {
+      dash.table.has(name) ? dash.table.delete(name) : dash.table.add(name);
+      b.setAttribute("aria-pressed", dash.table.has(name));
+      fn();
+    };
+  }
+  let w = $(".stats-body").clientWidth;
+  dash.ro = new ResizeObserver(() => { const now = $(".stats-body")?.clientWidth; if (now && now !== w) { w = now; draw(); } });
+  dash.ro.observe(body);
+}
+
+function card(name, title, extra, toggle = true) {
+  return h(`<section class="card" data-card="${name}"><div class="card-head"><div><h2>${esc(title)}</h2>${extra}</div>
+    ${toggle ? `<button class="card-toggle" aria-pressed="${dash.table.has(name)}">Table</button>` : ""}</div><div class="card-body"></div></section>`);
+}
+
+function legend(series) {
+  return `<ul class="legend">${series.map((s) => `<li title="${esc(s.title)}"><span class="key ${s.cls}"></span>${esc(s.name)}</li>`).join("")}</ul>`;
+}
+
+function tableView(box, head, rows) {
+  box.innerHTML = "";
+  const t = h(`<div class="table-scroll"><table class="stats-table"><thead><tr>${head.map((x) => `<th>${esc(x)}</th>`).join("")}</tr></thead><tbody></tbody></table></div>`);
+  for (const r of rows) $("tbody", t).append(h(`<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}</tr>`));
+  if (!rows.length) $("tbody", t).append(h(`<tr><td colspan="${head.length}">Nothing in this range.</td></tr>`));
+  box.append(t);
+}
+
+// niceMax picks a tick step of 1, 2 or 5 times a power of ten that gives at
+// most five gridlines, and rounds the axis maximum up to it.
+function niceMax(v) {
+  if (v <= 0) return { max: 1, step: 1 };
+  for (let p = 10 ** Math.floor(Math.log10(v / 5)); ; p *= 10) {
+    for (const m of [1, 2, 5]) {
+      const step = m * p;
+      if (Math.ceil(v / step - 1e-9) <= 5) return { max: Math.ceil(v / step - 1e-9) * step, step };
+    }
+  }
+}
+
+const NS = "http://www.w3.org/2000/svg";
+function sv(tag, attrs, parent) {
+  const n = document.createElementNS(NS, tag);
+  for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+  parent?.append(n);
+  return n;
+}
+
+// roundTop is a column segment with 4px corners on its free end only.
+function roundTop(x, y, w, hgt, r) {
+  r = Math.min(r, w / 2, hgt);
+  return `M${x},${y + hgt}V${y + r}Q${x},${y} ${x + r},${y}H${x + w - r}Q${x + w},${y} ${x + w},${y + r}V${y + hgt}Z`;
+}
+
+function chartFrame(box, height) {
+  box.innerHTML = "";
+  const W = Math.max(280, box.clientWidth), H = height;
+  const pad = { l: 36, r: 8, t: 8, b: 26 };
+  const svgEl = sv("svg", { class: "chart", viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img" });
+  box.append(svgEl);
+  return { svgEl, W, H, pad, iw: W - pad.l - pad.r, ih: H - pad.t - pad.b };
+}
+
+function yAxis(f, max, step, fmt) {
+  const g = sv("g", { class: "axis" }, f.svgEl);
+  for (let i = 0; i * step <= max + 1e-9; i++) {
+    const v = i * step;
+    const y = f.pad.t + f.ih - (v / max) * f.ih;
+    sv("line", { x1: f.pad.l, x2: f.W - f.pad.r, y1: y, y2: y, class: v === 0 ? "base" : "grid" }, g);
+    sv("text", { x: f.pad.l - 8, y: y + 4, "text-anchor": "end" }, g).textContent = fmt(v);
+  }
+}
+
+function xLabels(f, rows, x) {
+  const g = sv("g", { class: "axis" }, f.svgEl);
+  const every = Math.ceil(rows.length / Math.max(2, Math.floor(f.iw / 64)));
+  rows.forEach((r, i) => {
+    if (i % every) return;
+    sv("text", { x: x(i), y: f.H - 6, "text-anchor": "middle" }, g).textContent = r.label;
+  });
+}
+
+function showTip(html, x, y) {
+  const tip = $("#tip");
+  tip.innerHTML = html;
+  tip.hidden = false;
+  const r = tip.getBoundingClientRect();
+  tip.style.left = `${Math.max(8, Math.min(window.innerWidth - r.width - 8, x - r.width / 2))}px`;
+  tip.style.top = `${y - r.height - 12 < 8 ? y + 18 : y - r.height - 12}px`;
+}
+const hideTip = () => { $("#tip").hidden = true; };
+
+// stackedColumns draws one column per bucket. opts.fmt labels the axis,
+// opts.total the column's total and opts.value each series in the tooltip.
+function stackedColumns(box, rows, series, opts) {
+  const value = opts.value || String;
+  const f = chartFrame(box, 240);
+  const { max, step } = niceMax(Math.max(...rows.map((r) => r.total)));
+  yAxis(f, max, step, opts.fmt);
+  const band = f.iw / rows.length, bw = Math.max(2, Math.min(24, band * 0.62));
+  const x = (i) => f.pad.l + band * i + band / 2;
+  xLabels(f, rows, x);
+  const y = (v) => (v / max) * f.ih;
+  const g = sv("g", {}, f.svgEl);
+  rows.forEach((r, i) => {
+    const col = sv("g", { class: "col", tabindex: 0, "aria-label": `${r.long}: ${opts.total(r.total)}` }, g);
+    sv("rect", { class: "hit", x: f.pad.l + band * i, y: f.pad.t, width: band, height: f.ih }, col);
+    let top = f.pad.t + f.ih;
+    const segs = r.vals.map((v, si) => ({ v, si })).filter((s) => s.v > 0);
+    segs.forEach(({ v, si }, k) => {
+      const hgt = Math.max(1, y(v) - (k ? 2 : 0)); // 2px surface gap between segments
+      top -= hgt + (k ? 2 : 0);
+      const last = k === segs.length - 1;
+      sv(last ? "path" : "rect", last ? { d: roundTop(x(i) - bw / 2, top, bw, hgt, 4), class: `seg ${series[si].cls}` } : { x: x(i) - bw / 2, y: top, width: bw, height: hgt, class: `seg ${series[si].cls}` }, col);
+    });
+    const tip = () => {
+      const lines = series.map((s, si) => (r.vals[si] ? `<div class="tip-row"><span class="tip-key ${s.cls}"></span><b>${esc(value(r.vals[si]))}</b> <span class="k">${esc(s.name)}</span></div>` : "")).join("");
+      const b = col.getBoundingClientRect();
+      showTip(`<div class="k">${esc(r.long)}</div><div><b>${esc(opts.total(r.total))}</b></div>${lines}`, b.left + b.width / 2, b.top + f.ih - y(r.total));
+    };
+    col.addEventListener("pointerenter", tip);
+    col.addEventListener("focus", tip);
+    col.addEventListener("pointerleave", hideTip);
+    col.addEventListener("blur", hideTip);
+  });
+}
+
+function rateLine(box, rows) {
+  const f = chartFrame(box, 180);
+  const rates = rows.map((r) => (r.tools ? r.failed / r.tools : null));
+  const { max, step } = niceMax(Math.max(0.05, ...rates.filter((v) => v != null)));
+  yAxis(f, max, step, (v) => `${+(v * 100).toFixed(1)}%`);
+  const band = f.iw / rows.length;
+  const x = (i) => f.pad.l + band * i + band / 2;
+  xLabels(f, rows, x);
+  const y = (v) => f.pad.t + f.ih - (v / max) * f.ih;
+  // One path per run of buckets that had tool calls; empty buckets are gaps.
+  let d = "", area = "", run = [];
+  const flush = () => {
+    if (!run.length) return;
+    d += run.map((i, k) => `${k ? "L" : "M"}${x(i)},${y(rates[i])}`).join("");
+    area += `M${x(run[0])},${y(0)}` + run.map((i) => `L${x(i)},${y(rates[i])}`).join("") + `L${x(run.at(-1))},${y(0)}Z`;
+    run = [];
+  };
+  rates.forEach((v, i) => (v == null ? flush() : run.push(i)));
+  flush();
+  sv("path", { d: area, class: "rate-area" }, f.svgEl);
+  sv("path", { d, class: "rate-line" }, f.svgEl);
+  rates.forEach((v, i) => {
+    const alone = v != null && rates[i - 1] == null && rates[i + 1] == null;
+    if (alone) sv("circle", { cx: x(i), cy: y(v), r: 4, class: "rate-dot" }, f.svgEl);
+  });
+  const cross = sv("line", { class: "cross", y1: f.pad.t, y2: f.pad.t + f.ih, x1: 0, x2: 0, visibility: "hidden" }, f.svgEl);
+  const dot = sv("circle", { class: "rate-dot", r: 4, visibility: "hidden" }, f.svgEl);
+  const hit = sv("rect", { class: "hit", x: f.pad.l, y: f.pad.t, width: f.iw, height: f.ih, tabindex: 0, "aria-label": "Failure rate over time; use the arrow keys to read each point" }, f.svgEl);
+  let at = -1;
+  const show = (i) => {
+    at = Math.max(0, Math.min(rows.length - 1, i));
+    const r = rows[at], v = rates[at];
+    cross.setAttribute("x1", x(at)); cross.setAttribute("x2", x(at)); cross.setAttribute("visibility", "visible");
+    if (v != null) { dot.setAttribute("cx", x(at)); dot.setAttribute("cy", y(v)); dot.setAttribute("visibility", "visible"); } else dot.setAttribute("visibility", "hidden");
+    const b = f.svgEl.getBoundingClientRect(), sx = b.width / f.W;
+    showTip(`<div class="k">${esc(r.long)}</div>` + (r.tools ? `<div><b>${rate(r.failed, r.tools)}</b> <span class="k">failed</span></div><div class="k">${r.failed} of ${plural(r.tools, "call")}</div>` : `<div class="k">No tool calls</div>`),
+      b.left + x(at) * sx, b.top + (v != null ? y(v) : f.pad.t + f.ih) * sx);
+  };
+  const hide = () => { cross.setAttribute("visibility", "hidden"); dot.setAttribute("visibility", "hidden"); hideTip(); };
+  hit.addEventListener("pointermove", (e) => {
+    const b = f.svgEl.getBoundingClientRect();
+    show(Math.floor(((e.clientX - b.left) * (f.W / b.width) - f.pad.l) / band));
+  });
+  hit.addEventListener("pointerleave", hide);
+  hit.addEventListener("blur", hide);
+  hit.addEventListener("focus", () => show(at < 0 ? rows.length - 1 : at));
+  hit.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); show(at + (e.key === "ArrowLeft" ? -1 : 1)); }
+  });
+}
+
 /* ---------------- routing & refresh ---------------- */
+const onStats = () => location.hash.startsWith("#stats");
+
 function route() {
+  if (onStats()) return openStats();
   const m = location.hash.match(/^#s=(.+)$/);
   const key = m ? decodeURIComponent(m[1]) : null;
   if (key && state.data.sessions.some((s) => s.key === key)) {
@@ -1301,7 +1722,8 @@ async function init() {
   if (!state.data) return;
   route();
   window.addEventListener("hashchange", route);
-  $("#refresh").onclick = async () => { await load(true); if (!state.current) renderHome(); };
+  $("#refresh").onclick = async () => { await load(true); if (onStats()) loadStats(); else if (!state.current) renderHome(); };
+  $("#stats-open").onclick = () => { location.hash = statsHash(); closeDrawer(); };
   $("#q").addEventListener("input", (e) => { state.q = e.target.value; renderSidebar(); });
   $("#q").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.target.value = ""; state.q = ""; renderSidebar(); e.target.blur(); } });
   $("#q").addEventListener("focus", () => ($("#q-hint").hidden = true));
@@ -1339,7 +1761,8 @@ async function init() {
   setInterval(async () => {
     if (document.hidden) return;
     const changed = await load();
-    if (changed && !state.current) renderHome();
+    if (changed && onStats()) loadStats();
+    else if (changed && !state.current) renderHome();
     if (changed) startLive();
   }, 20000);
 }
