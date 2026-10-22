@@ -1,5 +1,5 @@
 // trail is a read-only browser for coding-agent sessions. It finds the session
-// logs that Claude Code and Codex leave on disk, files them under the project
+// logs that Claude Code, Codex and OpenCode leave on disk, files them under the project
 // folders they ran in, and shows each transcript next to the changes it made.
 package main
 
@@ -37,6 +37,7 @@ func main() {
 	port := flag.Int("port", 7878, "port to listen on (0 picks a free one)")
 	claudeDir := flag.String("claude-dir", envOr("CLAUDE_CONFIG_DIR", filepath.Join(homeDir(), ".claude")), "Claude Code config directory")
 	codexDir := flag.String("codex-dir", envOr("CODEX_HOME", filepath.Join(homeDir(), ".codex")), "Codex home directory")
+	opencodeDir := flag.String("opencode-dir", filepath.Join(envOr("XDG_DATA_HOME", filepath.Join(homeDir(), ".local", "share")), "opencode"), "OpenCode data directory (holds opencode.db)")
 	open := flag.Bool("open", false, "open the browser after starting")
 	list := flag.Bool("list", false, "print sessions grouped by folder and exit")
 	showVersion := flag.Bool("version", false, "print the version and exit")
@@ -47,7 +48,7 @@ func main() {
 		return
 	}
 
-	idx := NewIndex(&claudeProvider{dir: *claudeDir}, &codexProvider{dir: *codexDir})
+	idx := NewIndex(&claudeProvider{dir: *claudeDir}, &codexProvider{dir: *codexDir}, &opencodeProvider{dir: *opencodeDir})
 	start := time.Now()
 	status := idx.Scan(0)
 
@@ -72,7 +73,7 @@ func main() {
 		if s.Found {
 			state = fmt.Sprintf("%d sessions", s.Sessions)
 		}
-		fmt.Printf("  %-7s %-40s %s\n", s.Name, s.Root, state)
+		fmt.Printf("  %-8s %-40s %s\n", s.Name, s.Root, state)
 	}
 	fmt.Printf("  indexed in %s\n  open %s\n", time.Since(start).Round(time.Millisecond), url)
 	if *host != "127.0.0.1" && *host != "localhost" {
@@ -102,7 +103,7 @@ func printList(idx *Index) {
 	for _, root := range order {
 		fmt.Println(root)
 		for _, s := range byRoot[root] {
-			fmt.Printf("  %-6s %s  %-60s %3d edits  %s\n", s.Provider, s.Ended.Local().Format("2006-01-02 15:04"),
+			fmt.Printf("  %-8s %s  %-60s %3d edits  %s\n", s.Provider, s.Ended.Local().Format("2006-01-02 15:04"),
 				oneLine(s.Title, 60), s.Edits, s.ID)
 		}
 	}

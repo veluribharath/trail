@@ -35,6 +35,7 @@
   --del-strong: #f5cfcd;
   --claude: #7c5cd6;
   --codex: #0b8a8f;
+  --opencode: #c0407a;
   --hover: rgba(15, 23, 41, .05);
   --select: rgba(178, 111, 14, .11);
   --shadow: 0 1px 2px rgba(15, 23, 41, .06), 0 8px 24px -12px rgba(15, 23, 41, .18);
@@ -75,6 +76,7 @@
     --del-strong: rgba(240, 110, 100, .22);
     --claude: #a990fa;
     --codex: #3fc8cc;
+    --opencode: #f07fb0;
     --hover: rgba(231, 235, 243, .045);
     --select: rgba(242, 181, 68, .10);
     --shadow: 0 1px 0 rgba(255, 255, 255, .03) inset, 0 8px 24px -12px rgba(0, 0, 0, .6);
@@ -159,6 +161,7 @@ svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; s
 .pmark { width: 9px; height: 9px; border-radius: 3px; flex: none; background: var(--faint); }
 .pmark.claude { background: var(--claude); }
 .pmark.codex { background: var(--codex); }
+.pmark.opencode { background: var(--opencode); }
 
 .tree { flex: 1; overflow: auto; padding: 8px 8px 16px; scrollbar-width: thin; }
 .group-label { padding: 14px 10px 4px; color: var(--faint); font-size: 12px; font-weight: 500; }

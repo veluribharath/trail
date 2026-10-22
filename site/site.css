@@ -30,6 +30,7 @@
   --del: #b4232a;
   --claude: #7c5cd6;
   --codex: #0b8a8f;
+  --opencode: #c0407a;
   --shadow: 0 1px 2px rgba(15, 23, 41, .06), 0 8px 24px -12px rgba(15, 23, 41, .18);
   --shadow-shot: 0 40px 100px -30px rgba(15, 23, 41, .45), 0 2px 6px rgba(15, 23, 41, .08);
   color-scheme: light;
@@ -61,6 +62,7 @@
     --del: #f58b80;
     --claude: #a990fa;
     --codex: #3fc8cc;
+    --opencode: #f07fb0;
     --shadow: 0 1px 0 rgba(255, 255, 255, .03) inset, 0 8px 24px -12px rgba(0, 0, 0, .6);
     --shadow-shot: 0 40px 120px -30px rgba(0, 0, 0, .8), 0 0 0 1px rgba(255, 255, 255, .04);
     color-scheme: dark;
@@ -106,11 +108,12 @@ p { margin: 0; }
 /* hero */
 .hero { padding: 88px 0 0; text-align: center; overflow: hidden; }
 .eyebrow { display: inline-flex; align-items: center; gap: 8px; font-size: 14px; color: var(--muted); border: 1px solid var(--line); background: var(--surface); border-radius: 99px; padding: 4px 14px; }
-.eyebrow .dot + .dot, .eyebrow .dot.codex { margin-left: 8px; }
+.eyebrow .dot + .dot, .eyebrow .dot.codex, .eyebrow .dot.opencode { margin-left: 8px; }
 .dot { display: inline-block; width: 9px; height: 9px; border-radius: 3px; margin-right: 8px; vertical-align: 1px; }
 .eyebrow .dot { margin-right: 0; }
 .dot.claude { background: var(--claude); }
 .dot.codex { background: var(--codex); }
+.dot.opencode { background: var(--opencode); }
 h1 { font-size: clamp(40px, 6.4vw, 72px); margin: 26px auto 22px; max-width: 16ch; letter-spacing: -.035em; text-wrap: balance; }
 h1 em { font-style: normal; color: var(--blaze); }
 .clarify { font-size: 15px; color: var(--muted); margin: 14px auto 0; max-width: 40em; text-wrap: balance; }

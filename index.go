@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -26,9 +27,8 @@ type Index struct {
 }
 
 type entry struct {
-	size int64
-	mod  time.Time
-	sess *Session
+	stamp string
+	sess  *Session
 }
 
 type ProviderStatus struct {
@@ -59,9 +59,9 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 	x.mu.Unlock()
 
 	type job struct {
-		p    Provider
-		path string
-		fi   os.FileInfo
+		p     Provider
+		path  string
+		stamp string
 	}
 	var jobs []job
 	status := make([]ProviderStatus, 0, len(x.providers))
@@ -81,18 +81,18 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 			st.Error = err.Error()
 		}
 		for _, path := range paths {
-			fi, err := os.Stat(path)
-			if err != nil {
+			stamp, ok := sessionStamp(p, path)
+			if !ok {
 				continue
 			}
 			live[path] = true
 			x.mu.Lock()
 			e := x.entries[path]
 			x.mu.Unlock()
-			if e != nil && e.size == fi.Size() && e.mod.Equal(fi.ModTime()) {
+			if e != nil && e.stamp == stamp {
 				continue
 			}
-			jobs = append(jobs, job{p, path, fi})
+			jobs = append(jobs, job{p, path, stamp})
 		}
 		status = append(status, st)
 	}
@@ -120,7 +120,7 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 					s.Key = s.Provider + ":" + s.ID
 					s.Root, s.Worktree = x.repoRoot(s.Cwd)
 					x.mu.Lock()
-					x.entries[j.path] = &entry{size: j.fi.Size(), mod: j.fi.ModTime(), sess: s}
+					x.entries[j.path] = &entry{stamp: j.stamp, sess: s}
 					x.mu.Unlock()
 				}
 			}()
@@ -172,6 +172,20 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 	}
 	x.mu.Unlock()
 	return status
+}
+
+// sessionStamp returns a value that changes whenever the session at path
+// does: the file's size and mtime, or the provider's own stamp for sessions
+// that aren't files.
+func sessionStamp(p Provider, path string) (string, bool) {
+	if st, ok := p.(sessionStamper); ok {
+		return st.Stamp(path)
+	}
+	fi, err := os.Stat(path)
+	if err != nil {
+		return "", false
+	}
+	return strconv.FormatInt(fi.Size(), 10) + "@" + strconv.FormatInt(fi.ModTime().UnixNano(), 10), true
 }
 
 // Sessions returns a snapshot of every indexed session, newest first. They are
