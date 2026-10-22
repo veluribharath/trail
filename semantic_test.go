@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // conceptEmbedder stands in for a real model: each word votes for a concept,
@@ -197,6 +198,20 @@ func TestHTTPEmbedder(t *testing.T) {
 	if _, err := newHTTPEmbedder(srv.URL, "missing").Embed(context.Background(), []string{"a"}); err == nil || !strings.Contains(err.Error(), "try pulling") {
 		t.Errorf("server's error should come through: %v", err)
 	}
+
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-r.Context().Done():
+		case <-time.After(300 * time.Millisecond):
+		}
+	}))
+	defer slow.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := newHTTPEmbedder(slow.URL, "m").Embed(ctx, []string{"a"}); err == nil || !strings.Contains(err.Error(), "took too long") {
+		t.Errorf("slow server: %v", err)
+	}
+
 	srv.Close()
 	if _, err := newHTTPEmbedder(srv.URL, "m").Embed(context.Background(), []string{"a"}); err == nil || !strings.Contains(err.Error(), "is it running") {
 		t.Errorf("down server: %v", err)

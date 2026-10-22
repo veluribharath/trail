@@ -602,6 +602,9 @@ func (e *httpEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, 
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := e.client.Do(req)
 	if err != nil {
+		if ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) {
+			return nil, fmt.Errorf("the embedding server at %s took too long; the model may still be loading", e.base)
+		}
 		return nil, fmt.Errorf("can't reach the embedding server at %s; is it running?", e.base)
 	}
 	defer resp.Body.Close()
