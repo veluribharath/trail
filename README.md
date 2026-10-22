@@ -4,7 +4,7 @@ See what your coding agents did, folder by folder.
 
 ![trail showing a Claude Code session: the trace strip under the header, the transcript as a trail of steps on the left, and the diffs it made on the right](docs/screenshot.png)
 
-trail finds the sessions that Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first. Any session can be [exported](#export-a-session) as one HTML file to share.
+trail finds the sessions that Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first. Any session can be [exported](#export-a-session) as one HTML file to share, and [Lessons](#lessons) suggests rules for CLAUDE.md or AGENTS.md from what you keep correcting.
 
 Each session opens with a trace: one tick per step, prompts tall, edits amber, failures red. Drag across it to move through the transcript. Press ⌘K (Ctrl+K) to search: it matches session names, and everything said and run inside every transcript. Pick a match to open the session at that step, with every other matching step marked on the trace; `n` and `Shift+N` step through them. `/` filters the sidebar by name, and `j`/`k` step between sessions.
 
@@ -49,6 +49,7 @@ make build
 ./trail -search "flaky login"   # print matching sessions and steps, and exit
 ./trail -prices    # print the token prices used for costs, and exit
 ./trail -export c1 -o session.html   # write one session as an offline page, and exit
+./trail -retro .   # print rules worth adding to CLAUDE.md or AGENTS.md for this project, and exit
 ```
 
 On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop. Transcripts often contain secrets, so only do this on a network you trust (or tunnel the port over SSH instead).
@@ -68,6 +69,7 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | `-embed-model` | `nomic-embed-text` |
 | `-prices` | print the price table and exit |
 | `-export`, `-o` | off; see [Export a session](#export-a-session) |
+| `-retro` | off; a project folder, or `.`; see [Lessons](#lessons) |
 
 ## What it reads
 
@@ -155,6 +157,19 @@ In the browser, open a session and choose Export, then Download HTML; your brows
 
 Transcripts can contain secrets: API keys, tokens, environment variables, file contents and command output. Read the file before you share it. The file itself can't make any network request: its content security policy blocks everything but its own inlined script, styles and fonts, so opening it never loads or sends anything. Commits made in the session's window that don't touch its files are left out.
 
+## Lessons
+
+Lessons reads every session in a project for two kinds of repeated mistake, and suggests a line for your instructions file for each:
+
+- **Things you keep saying.** Corrections after the agent acted ("no, use pnpm", "no, put handlers in `server/`") and standing instructions anywhere ("always run the linter first", "don't add comments that restate the code"). Sentences about the same thing are grouped, so "use pnpm" and "no, we use pnpm here" count together.
+- **Commands that keep failing the same way.** A shell command whose error says something is missing or unknown (command not found, no module named, missing script, no rule to make target, unknown flag), or one that something else replaced right away: `npm install` failing and `pnpm install` working next suggests "Use `pnpm install`, not `npm install`." Tests that fail until the code is fixed don't count. Commands you refused more than once suggest asking first.
+
+Something said or seen once is a one-off: a lesson needs two sessions, or three times in one. Each one lists the steps behind it, and clicking one opens the session there. Suggestions your `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` already seem to cover are listed separately, since they came up anyway. Claude Code reads `CLAUDE.md`; Codex, OpenCode and Kiro CLI read `AGENTS.md`; Gemini CLI reads `GEMINI.md`.
+
+Open it with the Lessons button in a session's header, or the button that appears when you hover a project folder. Tick the rules you agree with and copy them. From the command line, `trail -retro .` prints the same for the project you are in, or name a folder: `trail -retro ~/code/shop`.
+
+It's heuristics over the transcripts, with no model involved and nothing sent anywhere, so read the suggestions before you paste them. trail never writes to the project: it reads the instruction files only to mark what they already say.
+
 ## How diffs and commits are matched
 
 The Edits tab comes straight from the transcript: each change is the before/after text the agent sent to its edit tool, so it is exact for that step. A Claude Code `Write` replaces the whole file, and the transcript doesn't say what was there before, so every line shows as added.
@@ -178,6 +193,7 @@ semantic.go  opt-in related-session search over a local embedding model
 git.go       commits in the session window
 server.go    JSON API and embedded UI
 export.go    one session as a self-contained HTML file
+retro.go     lessons: repeated corrections and failing commands as suggested rules
 live.go      live updates for a session that is still being written
 usage.go     token counts per response and session
 prices.go    pricing, with the bundled prices.json and overrides

@@ -545,6 +545,51 @@ details.tool svg.ic { color: var(--faint); }
 }
 .tip .k { opacity: .65; }
 
+/* ================= lessons ================= */
+.folder { position: relative; }
+.folder-retro {
+  position: absolute; top: 3px; right: 4px; display: none; place-items: center; width: 24px; height: 24px; padding: 0;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--raised); color: var(--muted); cursor: pointer;
+}
+.folder-retro svg { width: 14px; height: 14px; }
+.folder-retro:hover { color: var(--ink); border-color: var(--faint); }
+.folder:has(> .folder-row:hover) > .folder-retro, .folder-retro:hover, .folder-retro:focus-visible { display: grid; }
+.retro .eyebrow { display: flex; align-items: center; gap: 6px; margin: 0 0 8px; color: var(--blaze); font-size: 12.5px; font-weight: 600; }
+.retro .eyebrow svg { width: 14px; height: 14px; }
+.retro h1 { overflow-wrap: anywhere; }
+.retro code, .retro .mono { font-family: var(--mono); font-size: .9em; }
+.retro .l-rule code, .retro .l-why code, .retro-files code { padding: 1px 4px; border-radius: 4px; background: var(--sunk); border: 1px solid var(--line-soft); }
+.retro-files { margin: 8px 0 0; color: var(--faint); font-size: 13px; }
+.retro-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 36px 0 10px; }
+.retro-head h2 { margin: 0; }
+.btn:disabled { opacity: .5; cursor: default; }
+.retro-note { margin: -4px 0 12px; max-width: 72ch; color: var(--muted); font-size: 13px; }
+.retro-empty { margin-top: 32px; padding: 20px 22px; max-width: 560px; border: 1px dashed var(--line); border-radius: var(--r-lg); color: var(--muted); font-size: 14px; }
+.retro-empty strong { display: block; margin-bottom: 4px; color: var(--ink); font-weight: 600; }
+.lessons { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--raised); overflow: hidden; box-shadow: var(--shadow); }
+.lesson { display: flex; gap: 12px; padding: 14px 18px 12px; border-top: 1px solid var(--line-soft); }
+.lesson:first-child { border-top: 0; }
+.l-pick { flex: none; padding-top: 2px; }
+.l-pick input { width: 15px; height: 15px; margin: 0; accent-color: var(--blaze); cursor: pointer; }
+.l-body { flex: 1; min-width: 0; }
+.l-rule { font-size: 15px; font-weight: 580; color: var(--ink); line-height: 1.4; overflow-wrap: anywhere; }
+.l-in { display: inline-block; margin-left: 8px; padding: 0 6px; border-radius: 99px; background: var(--add-fill); color: var(--add); font-size: 11.5px; font-weight: 600; vertical-align: 2px; }
+.l-why { margin: 3px 0 0; color: var(--muted); font-size: 13px; }
+.l-err { margin: 6px 0 0; padding: 5px 8px; border-left: 2px solid var(--del); background: var(--del-fill); color: var(--ink-2); font-family: var(--mono); font-size: 12px; border-radius: 0 var(--r-sm) var(--r-sm) 0; overflow-wrap: anywhere; }
+.l-seen { margin-top: 6px; }
+.l-seen summary { width: fit-content; color: var(--faint); font-size: 12.5px; cursor: pointer; list-style-position: outside; }
+.l-seen summary:hover { color: var(--ink-2); }
+.l-rows { margin: 6px 0 2px; }
+.l-ex {
+  display: grid; grid-template-columns: 9px minmax(0, 1fr) auto; column-gap: 9px; align-items: center; width: 100%; padding: 6px 8px;
+  border: 0; border-radius: var(--r-sm); background: transparent; text-align: left; cursor: pointer; color: var(--ink-2);
+}
+.l-ex:hover { background: var(--hover); }
+.l-ex .q { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.l-ex .l-fix { margin-left: 8px; color: var(--add); }
+.l-ex .when { color: var(--faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.l-ex .t { grid-column: 2 / 4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--faint); font-size: 11.5px; }
+
 /* ================= responsive ================= */
 @media (max-width: 1180px) {
   .panes { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
@@ -576,6 +621,8 @@ details.tool svg.ic { color: var(--faint); }
   .src { grid-template-columns: 9px 90px minmax(0, 1fr); }
   .src .state { grid-column: 2 / 4; margin-top: -8px; }
   .side-foot { display: none; }
+  .lesson { padding: 12px 14px 10px; gap: 10px; }
+  .retro-head { flex-wrap: wrap; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }

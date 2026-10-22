@@ -53,6 +53,7 @@ func main() {
 	showPrices := flag.Bool("prices", false, "print the token prices used for API-equivalent costs and exit")
 	export := flag.String("export", "", "write one session (id, provider:id, or id prefix) as a single offline HTML file and exit")
 	out := flag.String("o", "", "file for -export to write; without it the page goes to standard output")
+	retro := flag.String("retro", "", "print suggested CLAUDE.md or AGENTS.md rules from a project's sessions (a folder, or . for this one) and exit")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Parse()
 
@@ -97,6 +98,16 @@ func main() {
 			fmt.Fprintln(os.Stderr, "trail:", err)
 			os.Exit(1)
 		}
+		return
+	}
+	if *retro != "" {
+		root, err := retroRoot(idx, *retro)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "trail:", err)
+			os.Exit(1)
+		}
+		r, _ := NewRetroCache(idx).Build(root)
+		printRetro(os.Stdout, r, homeDir())
 		return
 	}
 	srch := NewSearch(idx)
@@ -152,7 +163,7 @@ func main() {
 		openBrowser(url)
 	}
 
-	srv := &Server{index: idx, search: srch, semantic: sem, home: homeDir(), version: currentVersion()}
+	srv := &Server{index: idx, search: srch, semantic: sem, retro: NewRetroCache(idx), home: homeDir(), version: currentVersion()}
 	httpSrv := &http.Server{Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	if err := httpSrv.Serve(ln); err != nil {
 		fmt.Fprintln(os.Stderr, "trail:", err)

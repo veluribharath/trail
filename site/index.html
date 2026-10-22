@@ -87,9 +87,9 @@
       <h2 id="feat-h" class="section-title">Everything an agent did, in one place.</h2>
       <div class="grid">
         <article class="card">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5V18a1.5 1.5 0 0 0 1.5 1.5h15A1.5 1.5 0 0 0 21 18V9a1.5 1.5 0 0 0-1.5-1.5H12L10 5H4.5A1.5 1.5 0 0 0 3 6.5z"/></svg>
-          <h3>Filed by folder</h3>
-          <p>Sessions are grouped under the git repository they ran in. A session in a linked worktree lands under the main repo, labelled with its worktree and branch.</p>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="4.5" width="14" height="16.5" rx="2"/><path d="M9 4.5V3h6v1.5M9 12.5l2.2 2.2L15.5 10"/></svg>
+          <h3>Learn from your sessions</h3>
+          <p>Lessons finds what you keep telling your agents (“no, use pnpm”) and commands that keep failing the same way, and suggests rules for CLAUDE.md or AGENTS.md, each with the steps behind it. It only suggests; your files stay yours.</p>
         </article>
         <article class="card">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h7v14H4zM13 5h7v14h-7zM8 9h-.01M17 10l-2 2 2 2"/></svg>
@@ -195,7 +195,8 @@ trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</but
           <pre><code>./trail          <span class="c"># http://127.0.0.1:7878</span>
 ./trail -open    <span class="c"># and open the browser</span>
 ./trail -list    <span class="c"># print sessions by folder and exit</span>
-./trail -export c1 -o session.html  <span class="c"># one session as an offline page</span></code></pre>
+./trail -export c1 -o session.html  <span class="c"># one session as an offline page</span>
+./trail -retro .  <span class="c"># rules worth adding to CLAUDE.md or AGENTS.md</span></code></pre>
           <p class="note">On a remote dev box, run <code>./trail -host 0.0.0.0</code> on a network you trust, or tunnel the port over SSH.</p>
         </div>
         <div class="table-scroll">
@@ -210,6 +211,7 @@ trail -open</code><button class="copy" type="button" aria-label="Copy">Copy</but
               <tr><td><code>-gemini-dir</code></td><td><code>$GEMINI_CLI_HOME/.gemini</code> or <code>~/.gemini</code></td></tr>
               <tr><td><code>-kiro-dir</code></td><td><code>~/.kiro</code></td></tr>
               <tr><td><code>-kiro-data-dir</code></td><td><code>~/.local/share/kiro-cli</code>; <code>~/Library/Application Support/kiro-cli</code> on macOS</td></tr>
+              <tr><td><code>-retro</code></td><td>off; a project folder, or <code>.</code>; see <a href="https://github.com/veluribharath/trail#lessons">Lessons</a></td></tr>
               <tr><td><code>-export</code>, <code>-o</code></td><td>off; see <a href="https://github.com/veluribharath/trail#export-a-session">Export a session</a></td></tr>
             </tbody>
           </table>
