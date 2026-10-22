@@ -311,6 +311,7 @@ const ICON = {
   clock: '<circle cx="8" cy="8" r="5.5"/><path d="M8 5v3l2 1.5"/>',
   compare: '<rect x="2.5" y="3" width="4.5" height="10" rx="1"/><rect x="9" y="3" width="4.5" height="10" rx="1"/>',
   chip: '<rect x="4" y="4" width="8" height="8" rx="1.5"/><path d="M6.5 2v2M9.5 2v2M6.5 12v2M9.5 12v2M2 6.5h2M2 9.5h2M12 6.5h2M12 9.5h2"/>',
+  lesson: '<rect x="3.5" y="3" width="9" height="11" rx="1.5"/><path d="M6 3V2h4v1M6 8.5l1.5 1.5 2.8-3"/>',
   star: '<path d="M8 2.4l1.7 3.5 3.8.55-2.75 2.7.65 3.8L8 11.15l-3.4 1.8.65-3.8L2.5 6.45l3.8-.55z"/>',
   note: '<path d="M3.5 3h9v6.5L9.5 12.5h-6z"/><path d="M9.5 12.5v-3h3M5.5 6h5M5.5 8.5h2.5"/>',
 };
@@ -473,10 +474,12 @@ function renderSidebar() {
     const slash = node.name.lastIndexOf("/");
     const pre = slash > 0 ? node.name.slice(0, slash + 1) : "";
     const last = slash > 0 ? node.name.slice(slash + 1) : node.name;
+    const project = node.sessions.find((s) => tildify(s.root) === node.path)?.root;
     const el = h(`<div class="folder" aria-expanded="${open}">
       <button class="folder-row" title="${esc(node.path)}">${svg("down", "chev")}${svg("folder", "ficon")}
         <span class="name"><span class="pre">${esc(pre)}</span>${esc(last)}</span>${node.usage ? `<span class="fcost" title="${esc((usagePref.tokens ? "Tokens" : "API-equivalent cost") + " of every session in this folder\n\n" + usageLines(node.usage))}">${esc(usageShort(node.usage))}</span>` : ""}<span class="count">${node.count}</span>
-      </button><div class="kids"></div></div>`);
+      </button>${project ? `<button class="folder-retro" title="Lessons: rules worth adding to CLAUDE.md or AGENTS.md, from this project's sessions" aria-label="Lessons for ${esc(node.name)}">${svg("lesson")}</button>` : ""}<div class="kids"></div></div>`);
+    if (project) $(".folder-retro", el).onclick = () => { location.hash = retroHash(project); closeDrawer(); };
     $(".folder-row", el).onclick = () => {
       const now = el.getAttribute("aria-expanded") !== "true";
       el.setAttribute("aria-expanded", now);
@@ -719,7 +722,7 @@ function sessionHeader() {
         <div class="facts">${facts}</div>
         ${usage}
       </div>
-      <div class="actions">${EXPORTED ? exportedActions() : `<span class="live" ${live.on ? "" : "hidden"} title="The agent is still writing this session. New steps appear as it works.">Live</span><button class="btn bookmark" id="bookmark" aria-pressed="false" title="Bookmark this session (B)">${svg("star")}<span>Bookmark</span></button><button class="btn" id="compare" title="Put this session next to another one">${svg("compare")}<span>Compare</span></button><button class="btn" id="export" title="Save this session as one HTML file">${svg("download")}<span>Export</span></button><button class="btn" id="copy" title="${esc(s.resume)}">${svg("copy")}<span>Copy resume command</span></button>`}</div>
+      <div class="actions">${EXPORTED ? exportedActions() : `<span class="live" ${live.on ? "" : "hidden"} title="The agent is still writing this session. New steps appear as it works.">Live</span><button class="btn bookmark" id="bookmark" aria-pressed="false" title="Bookmark this session (B)">${svg("star")}<span>Bookmark</span></button><button class="btn" id="retro" title="Rules worth adding to CLAUDE.md or AGENTS.md, from every session in this project">${svg("lesson")}<span>Lessons</span></button><button class="btn" id="compare" title="Put this session next to another one">${svg("compare")}<span>Compare</span></button><button class="btn" id="export" title="Save this session as one HTML file">${svg("download")}<span>Export</span></button><button class="btn" id="copy" title="${esc(s.resume)}">${svg("copy")}<span>Copy resume command</span></button>`}</div>
     </header>`);
   const tog = $("#usage-toggle", head);
   if (tog) tog.onclick = (e) => { e.stopPropagation(); setUsagePref(!usagePref.tokens); };
@@ -729,6 +732,7 @@ function sessionHeader() {
     return head;
   }
   $("#export", head).onclick = () => exportDialog(s);
+  $("#retro", head).onclick = () => { location.hash = retroHash(s.root); };
   setBookmarkButton($("#bookmark", head), !!notesOf(s.key)?.bookmarked);
   $("#bookmark", head).onclick = toggleBookmark;
   $("#compare", head).onclick = () => compareWith(s);
@@ -2105,6 +2109,124 @@ function openPalette(q = "") {
 // next frame, and keys pressed before then would be typed into it.
 function closePalette() { $("#palette").hidden = true; $("#palette-q").blur(); clearTimeout(palette.timer); palette.seq++; }
 
+/* ---------------- lessons ---------------- */
+// Lessons for one project: what the person kept telling the agents and
+// commands that kept failing, as rules for CLAUDE.md or AGENTS.md. trail
+// only suggests them; it never writes to the project.
+const retro = { seq: 0, data: null };
+const retroHash = (root) => "#retro=" + encodeURIComponent(root);
+const onRetro = () => location.hash.startsWith("#retro=");
+const times = (n) => (n === 1 ? "once" : n === 2 ? "twice" : `${n} times`);
+function agoWords(iso) {
+  const a = ago(iso);
+  return /^\d+[mhd]$/.test(a) ? a + " ago" : a === "now" ? "just now" : a;
+}
+const ruleHTML = (r) => esc(r).replace(/`([^`]+)`/g, "<code>$1</code>");
+
+async function openRetro(root) {
+  stopLive();
+  state.current = null;
+  renderSidebar();
+  const view = $("#view");
+  const n = state.data.sessions.filter((s) => s.root === root).length;
+  view.innerHTML = `<div class="loading">Reading ${plural(n, "session")} in ${esc(tildify(root))}…</div>`;
+  const seq = ++retro.seq;
+  try {
+    const d = await api("/api/retro?root=" + encodeURIComponent(root));
+    if (seq !== retro.seq || !onRetro()) return;
+    retro.data = d;
+    renderRetro();
+  } catch (e) {
+    if (seq !== retro.seq) return;
+    view.innerHTML = "";
+    view.append(h(`<div class="empty-pane"><strong>Couldn’t read this project</strong>${esc(e.message)}</div>`));
+  }
+}
+
+function renderRetro() {
+  const d = retro.data, view = $("#view");
+  const fresh = d.lessons.filter((l) => l.rule && !l.covered);
+  const open = d.lessons.filter((l) => !l.rule && !l.covered);
+  const covered = d.lessons.filter((l) => l.covered);
+  const files = d.targets.map((t) => `<code>${esc(t.file)}</code>`);
+  const readers = d.targets.map((t) => `${t.agents.map((a) => PROVIDERS[a] || a).join(", ")} ${t.agents.length === 1 ? "reads" : "read"} <code>${esc(t.file)}</code>`).join("; ");
+  const el = h(`<div class="home retro"><div class="home-inner">
+    <p class="eyebrow">${svg("lesson")}Lessons</p>
+    <h1 title="${esc(d.root)}">${esc(tildify(d.root))}</h1>
+    <p class="lede">From ${plural(d.sessions, "session")}: what you kept telling the agents, and commands that kept failing the same way, as rules worth adding to ${files.join(" or ") || "your instructions file"}. trail only suggests them; it never edits your files.</p>
+    ${d.targets.length ? `<p class="retro-files">${readers}.${d.files.length ? ` Found ${d.files.map((f) => `<code>${esc(f)}</code>`).join(", ")}.` : ""}</p>` : ""}
+    </div></div>`);
+  const inner = $(".home-inner", el);
+  if (!d.lessons.length) {
+    inner.append(h(`<div class="retro-empty"><strong>Nothing repeats yet</strong>No instruction you gave in more than one session, and no command that kept failing the same way. Lessons show up here once something does.</div>`));
+  }
+  if (fresh.length) {
+    const head = h(`<div class="retro-head"><h2>Suggested rules</h2><button class="btn" id="retro-copy">${svg("copy")}<span>Copy rules</span></button></div>`);
+    inner.append(head);
+    const list = h(`<div class="lessons"></div>`);
+    for (const l of fresh) list.append(lessonCard(l, true));
+    inner.append(list);
+    const copy = $("#retro-copy", head);
+    const label = () => {
+      const n = $$(".lesson input:checked", list).length;
+      $("span", copy).textContent = n === fresh.length ? "Copy rules" : `Copy ${plural(n, "rule")}`;
+      copy.disabled = !n;
+    };
+    list.addEventListener("change", label);
+    copy.onclick = async () => {
+      const text = $$(".lesson", list).filter((c) => $("input", c).checked).map((c) => "- " + c.dataset.rule).join("\n") + "\n";
+      try {
+        await navigator.clipboard.writeText(text);
+        copy.classList.add("done"); $("svg", copy).innerHTML = ICON.check; $("span", copy).textContent = "Copied";
+        setTimeout(() => { copy.classList.remove("done"); $("svg", copy).innerHTML = ICON.copy; label(); }, 1800);
+      } catch { $("span", copy).textContent = "Couldn’t copy"; }
+    };
+  }
+  if (open.length) {
+    inner.append(h(`<h2>Kept failing, no fix seen</h2>`));
+    inner.append(h(`<p class="retro-note">trail saw these fail again and again but not what works instead. A line on how to run them saves the next session the same detour.</p>`));
+    const list = h(`<div class="lessons"></div>`);
+    for (const l of open) list.append(lessonCard(l, false));
+    inner.append(list);
+  }
+  if (covered.length) {
+    inner.append(h(`<h2>Already in your instructions</h2>`));
+    inner.append(h(`<p class="retro-note">Your instructions seem to say these already, yet they still came up. They may need to be clearer, or nearer the top.</p>`));
+    const list = h(`<div class="lessons"></div>`);
+    for (const l of covered) list.append(lessonCard(l, false));
+    inner.append(list);
+  }
+  view.innerHTML = "";
+  view.append(el);
+}
+
+function lessonCard(l, pick) {
+  const cmd = (c) => `<code>${esc(c)}</code>`;
+  const where = `in ${plural(l.sessions, "session")}, last ${esc(agoWords(l.last))}`;
+  const why = l.kind === "correction" ? `You said this ${times(l.count)} ${where}.`
+    : l.kind === "rejected" ? `You refused ${cmd(l.command)} ${times(l.count)} ${where}.`
+    : `${cmd(l.command)} failed ${times(l.count)} ${where}.${l.fix ? ` ${cmd(l.fix)} worked right after ${l.fixes === 1 ? "one" : l.fixes === l.count ? (l.count === 2 ? "both" : "all of them") : `${l.fixes} of them`}.` : ""}`;
+  const title = l.rule ? ruleHTML(l.rule) : `${cmd(l.command)} keeps failing`;
+  const el = h(`<article class="lesson ${esc(l.kind)}" data-rule="${esc(l.rule || "")}">
+    ${pick ? `<label class="l-pick"><input type="checkbox" checked aria-label="Include this rule when copying"></label>` : ""}
+    <div class="l-body">
+      <div class="l-rule">${title}${l.covered ? `<span class="l-in">In ${esc(l.covered)}</span>` : ""}</div>
+      <p class="l-why">${why}</p>
+      ${l.error && l.kind === "command" ? `<p class="l-err">${esc(l.error)}</p>` : ""}
+      <details class="l-seen"><summary>${l.seen.length < l.count ? `Latest ${l.seen.length} of ${l.count}` : plural(l.seen.length, "step")}</summary><div class="l-rows"></div></details>
+    </div></article>`);
+  const rows = $(".l-rows", el);
+  for (const e of l.seen) {
+    const prov = e.key.split(":")[0];
+    const what = l.kind === "correction" ? `“${esc(e.text)}”` : `<span class="mono">$ ${esc(e.text)}</span>${e.fix ? `<span class="l-fix">then <span class="mono">${esc(e.fix)}</span></span>` : ""}`;
+    const row = h(`<button class="l-ex" title="Open this step"><span class="pmark ${esc(prov)}"></span><span class="q">${what}</span>
+      <span class="when">${esc(ago(e.time))}</span><span class="t">${esc(e.title)} · step ${e.event + 1}</span></button>`);
+    row.onclick = () => { state.pendingJump = { event: e.event, field: l.kind === "correction" ? "prompt" : "tool" }; go(e.key); };
+    rows.append(row);
+  }
+  return el;
+}
+
 /* ---------------- stats ---------------- */
 const RANGES = [["7", "7 days"], ["30", "30 days"], ["90", "90 days"], ["365", "1 year"], ["all", "All time"]];
 const NAMED_PROJECTS = 5; // the rest of the stack folds into Other
@@ -2535,6 +2657,8 @@ function route() {
     return;
   }
   cmp.seq++;
+  const r = location.hash.match(/^#retro=(.+)$/);
+  if (r) return openRetro(decodeURIComponent(r[1]));
   if (onStats()) return openStats();
   if (onBlame()) {
     const q = new URLSearchParams(location.hash.slice(1));
@@ -2599,7 +2723,7 @@ async function init() {
   if (!state.data) return;
   route();
   window.addEventListener("hashchange", route);
-  $("#refresh").onclick = async () => { await load(true); if (onStats()) loadStats(); else if (!state.current && !onBlame() && !onCompare()) renderHome(); };
+  $("#refresh").onclick = async () => { await load(true); if (onStats()) loadStats(); else if (onRetro()) route(); else if (!state.current && !onBlame() && !onCompare()) renderHome(); };
   $("#stats-open").onclick = () => { location.hash = statsHash(); closeDrawer(); };
   $("#q").addEventListener("input", (e) => { state.q = e.target.value; renderSidebar(); });
   $("#q").addEventListener("keydown", (e) => { if (e.key === "Escape") { e.target.value = ""; state.q = ""; renderSidebar(); e.target.blur(); } });
@@ -2640,7 +2764,7 @@ async function init() {
     if (document.hidden) return;
     const changed = await load();
     if (changed && onStats()) loadStats();
-    else if (changed && !state.current && !onBlame() && !onCompare()) renderHome();
+    else if (changed && !state.current && !onBlame() && !onRetro() && !onCompare()) renderHome();
     if (changed) startLive();
   }, 20000);
 }

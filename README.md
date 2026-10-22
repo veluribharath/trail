@@ -4,7 +4,7 @@ See what your coding agents did, folder by folder.
 
 ![trail showing a Claude Code session: the trace strip under the header, the transcript as a trail of steps on the left, and the diffs it made on the right](docs/screenshot.png)
 
-trail finds the sessions that Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first. Any session can be [exported](#export-a-session) as one HTML file to share, and [Stats](#stats) show how your agents work across every project. And `trail blame file:line` [tells you which session wrote a line](#who-wrote-this-line), and which step and prompt.
+trail finds the sessions that Claude Code, Codex, OpenCode, Gemini CLI and Kiro CLI leave on your machine, files each session under the project it ran in, and shows the transcript next to the changes it made. Click an edit in the transcript to jump to its diff; click a diff to jump back to the step that made it. A Commits tab lists what landed in git while the session ran, with the commits that touch the agent's files first. Any session can be [exported](#export-a-session) as one HTML file to share, and [Stats](#stats) show how your agents work across every project. And `trail blame file:line` [tells you which session wrote a line](#who-wrote-this-line), and which step and prompt. [Lessons](#lessons) suggests rules for CLAUDE.md or AGENTS.md from what you keep correcting.
 
 Each session opens with a trace: one tick per step, prompts tall, edits amber, failures red. Drag across it to move through the transcript. Press ⌘K (Ctrl+K) to search: it matches session names, and everything said and run inside every transcript. Pick a match to open the session at that step, with every other matching step marked on the trace; `n` and `Shift+N` step through them. `/` filters the sidebar by name, and `j`/`k` step between sessions. [Bookmark](#notes-and-bookmarks) a session or a single step, and leave yourself a note on either.
 
@@ -52,6 +52,7 @@ make build
 ./trail blame cart.go:42        # the session and step that wrote a line, and exit
 ./trail -prices    # print the token prices used for costs, and exit
 ./trail -export c1 -o session.html   # write one session as an offline page, and exit
+./trail -retro .   # print rules worth adding to CLAUDE.md or AGENTS.md for this project, and exit
 ./trail -notes     # print your bookmarks and notes, and exit
 ./trail -stats 30   # print the last 30 days in numbers (or -stats all), and exit
 ./trail -mcp       # an MCP server on stdio, so your agent can search past sessions
@@ -78,6 +79,7 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | `-no-notes` | off: `-export` includes your notes and bookmarks |
 | `-notes` | print your bookmarks and notes and exit; see [Notes and bookmarks](#notes-and-bookmarks) |
 | `-stats` | off; a number of days, or `all`; see [Stats](#stats) |
+| `-retro` | off; a project folder, or `.`; see [Lessons](#lessons) |
 | `-mcp` | off; see [Let your agent search past sessions](#let-your-agent-search-past-sessions-mcp) |
 | `-compare` | off; see [Compare two sessions](#compare-two-sessions) |
 
@@ -249,6 +251,18 @@ The comparison shows:
 
 From the command line, `./trail -compare A B` prints the numbers and the file list. A and B are session ids, `provider:id`, or the start of an id, as for `-export`.
 
+## Lessons
+
+Lessons reads every session in a project for two kinds of repeated mistake, and suggests a line for your instructions file for each:
+
+- **Things you keep saying.** Corrections after the agent acted ("no, use pnpm", "no, put handlers in `server/`") and standing instructions anywhere ("always run the linter first", "don't add comments that restate the code"). Sentences about the same thing are grouped, so "use pnpm" and "no, we use pnpm here" count together.
+- **Commands that keep failing the same way.** A shell command whose error says something is missing or unknown (command not found, no module named, missing script, no rule to make target, unknown flag), or one that something else replaced right away: `npm install` failing and `pnpm install` working next suggests "Use `pnpm install`, not `npm install`." Tests that fail until the code is fixed don't count. Commands you refused more than once suggest asking first.
+
+Something said or seen once is a one-off: a lesson needs two sessions, or three times in one. Each one lists the steps behind it, and clicking one opens the session there. Suggestions your `CLAUDE.md`, `AGENTS.md` or `GEMINI.md` already seem to cover are listed separately, since they came up anyway. Claude Code reads `CLAUDE.md`; Codex, OpenCode and Kiro CLI read `AGENTS.md`; Gemini CLI reads `GEMINI.md`.
+
+Open it with the Lessons button in a session's header, or the button that appears when you hover a project folder. Tick the rules you agree with and copy them. From the command line, `trail -retro .` prints the same for the project you are in, or name a folder: `trail -retro ~/code/shop`.
+
+It's heuristics over the transcripts, with no model involved and nothing sent anywhere, so read the suggestions before you paste them. trail never writes to the project: it reads the instruction files only to mark what they already say.
 ## Stats
 
 The chart button at the top of the sidebar (or the link on the home page) opens Stats for the last 7, 30 or 90 days, a year, or all time, across every project or just one. Agents you turn off in the sidebar are left out.
@@ -290,6 +304,7 @@ export.go    one session as a self-contained HTML file
 notes.go     your notes and bookmarks, in trail's own file
 redact.go    secret redaction for exports and MCP results
 mcp.go       trail -mcp: the MCP server and its tools
+retro.go     lessons: repeated corrections and failing commands as suggested rules
 compare.go   two sessions side by side, and -compare
 live.go      live updates for a session that is still being written
 usage.go     token counts per response and session
