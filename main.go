@@ -51,6 +51,10 @@ func main() {
 	export := flag.String("export", "", "write one session (id, provider:id, or id prefix) as a single offline HTML file and exit")
 	out := flag.String("o", "", "file for -export to write; without it the page goes to standard output")
 	showVersion := flag.Bool("version", false, "print the version and exit")
+	flag.Usage = func() {
+		fmt.Fprintln(flag.CommandLine.Output(), "usage: trail [flags]\n       trail [flags] blame file[:line[-line]]\n\nflags:")
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 
 	if *showVersion {
@@ -79,6 +83,22 @@ func main() {
 	if *list {
 		printList(idx)
 		return
+	}
+	if flag.Arg(0) == "blame" {
+		if flag.NArg() != 2 {
+			fmt.Fprintln(os.Stderr, "usage: trail blame file[:line[-line]]")
+			os.Exit(2)
+		}
+		if err := printBlame(idx, flag.Arg(1)); err != nil {
+			fmt.Fprintln(os.Stderr, "trail:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if flag.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "trail: unknown command %q\n", flag.Arg(0))
+		flag.Usage()
+		os.Exit(2)
 	}
 	if *export != "" {
 		if err := exportSession(idx, *export, *out); err != nil {
