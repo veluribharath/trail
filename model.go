@@ -36,6 +36,15 @@ type sessionNamer interface {
 	SessionNames() map[string]string
 }
 
+// sessionStamper is implemented by providers whose sessions are not one file
+// each (OpenCode keeps every session in one database). Discover returns a
+// path per session, and Stamp returns a value that changes whenever that
+// session does, in place of the file's size and mtime. ok is false for a
+// session that no longer exists.
+type sessionStamper interface {
+	Stamp(path string) (stamp string, ok bool)
+}
+
 // Session is the summary row shown in the folder tree.
 type Session struct {
 	Key      string `json:"key"` // provider:id, unique across providers

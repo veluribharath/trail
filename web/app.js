@@ -1,6 +1,6 @@
 "use strict";
 
-const PROVIDERS = { claude: "Claude Code", codex: "Codex" };
+const PROVIDERS = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
 const PER_FOLDER = 6;
 const WRITE_PREVIEW = 400;
 const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
@@ -177,7 +177,7 @@ function renderSidebar() {
   const sessions = visibleSessions();
   tree.innerHTML = "";
   if (!state.data.sessions.length) {
-    tree.append(h(`<div class="empty">No sessions yet. Run Claude Code or Codex in a project, then rescan.</div>`));
+    tree.append(h(`<div class="empty">No sessions yet. Run Claude Code, Codex or OpenCode in a project, then rescan.</div>`));
     return;
   }
   if (!sessions.length) {
@@ -256,7 +256,7 @@ function renderHome() {
   view.innerHTML = "";
   if (!d.sessions.length) {
     view.append(h(`<div class="home"><div class="home-inner"><h1>No sessions yet</h1>
-      <p class="lede">trail reads the logs Claude Code and Codex keep on this machine. Run either one in a project, then rescan.</p>
+      <p class="lede">trail reads the sessions Claude Code, Codex and OpenCode keep on this machine. Run any of them in a project, then rescan.</p>
       <h2>Where trail looks</h2><div class="sources"></div></div></div>`));
   } else {
     view.append(h(`<div class="home"><div class="home-inner">
