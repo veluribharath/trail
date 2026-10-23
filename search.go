@@ -20,6 +20,9 @@ import (
 // few sessions a result shows, through a small cache of parsed transcripts.
 type Search struct {
 	idx *Index
+	// keep, when set before the first sync, limits the index to the sessions
+	// it accepts by key. trail recall uses it to read one project only.
+	keep func(key string) bool
 
 	syncing sync.Mutex // one sync at a time
 
@@ -31,6 +34,7 @@ type Search struct {
 	totalLen int
 	vocab    []string // sorted terms for prefix matching; may lag a sync
 	total    int      // session files known to the session index at the last sync
+	changes  int      // sessions indexed or dropped by syncs so far
 	pending  int      // of those, still being read
 
 	cacheMu sync.Mutex
@@ -110,6 +114,9 @@ func (s *Search) sync() {
 	changed := false
 	s.mu.Lock()
 	for _, f := range files {
+		if s.keep != nil && !s.keep(f.key) {
+			continue
+		}
 		live[f.path] = true
 		if ss := s.byPath[f.path]; ss != nil && ss.stamp == f.stamp {
 			ss.key = f.key
@@ -120,10 +127,12 @@ func (s *Search) sync() {
 	for path, ss := range s.byPath {
 		if !live[path] {
 			s.remove(path, ss)
+			s.changes++
 			changed = true
 		}
 	}
-	s.total, s.pending = len(files), len(todo)
+	s.total, s.pending = len(live), len(todo)
+	s.changes += len(todo)
 	s.mu.Unlock()
 
 	ch := make(chan indexedFile)

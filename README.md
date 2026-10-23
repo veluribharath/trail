@@ -57,6 +57,7 @@ make build
 ./trail -stats 30   # print the last 30 days in numbers (or -stats all), and exit
 ./trail -mcp       # an MCP server on stdio, so your agent can search past sessions
 ./trail -compare c1 c2   # print two sessions side by side, and exit
+./trail recall "why is the db locked in tests"   # what the recall hook would add to this prompt, and exit
 ```
 
 On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop. Transcripts often contain secrets, so only do this on a network you trust (or tunnel the port over SSH instead).
@@ -82,6 +83,7 @@ On a remote dev box, `./trail -host 0.0.0.0` and open the port from your laptop.
 | `-retro` | off; a project folder, or `.`; see [Lessons](#lessons) |
 | `-mcp` | off; see [Let your agent search past sessions](#let-your-agent-search-past-sessions-mcp) |
 | `-compare` | off; see [Compare two sessions](#compare-two-sessions) |
+| `recall` | a prompt hook, off until you install it; see [Recall past sessions in the prompt](#recall-past-sessions-in-the-prompt-experimental) |
 
 ## What it reads
 
@@ -131,7 +133,7 @@ Any server with an OpenAI-compatible embeddings API works too (llama.cpp, LM Stu
 What changes when you turn it on:
 
 - trail sends each turn's text (prompt, replies, one-line tool summaries) to the embedding server, `http://127.0.0.1:11434` unless you say otherwise. If you point `-embed-url` at another machine, transcript text goes there; trail warns you at startup.
-- trail writes the vectors to its own cache (`~/Library/Caches/trail/vectors` on macOS, `~/.cache/trail/vectors` on Linux), readable only by you, so a restart only embeds new or changed sessions. It never writes to agent storage. `./trail -forget` deletes the cache. Your notes and bookmarks aren't in it, so they stay.
+- trail writes the vectors to its own cache (`~/Library/Caches/trail/vectors` on macOS, `~/.cache/trail/vectors` on Linux), readable only by you, so a restart only embeds new or changed sessions. It never writes to agent storage. `./trail -forget` deletes the cache, and the recall hook's cache with it. Your notes and bookmarks aren't in it, so they stay.
 - The first run embeds every session, newest first, and can take a while on a large history; search works from the start and picks up related sessions as they are ready.
 
 Queries that use `in:`, `tool:` or `file:` stay word searches, since the vectors don't know about fields, tools or files.
@@ -227,6 +229,51 @@ Nothing runs in the background. The agent starts `trail -mcp` with each session,
 
 Whatever the agent reads goes to its model provider, so every result is redacted the same way as `-export -redact`. Redaction is pattern matching: it catches the usual shapes of keys and tokens, not every secret a transcript can hold.
 
+## Recall past sessions in the prompt (experimental)
+
+`trail recall` is a prompt hook for Claude Code and Codex. Before the agent sees your prompt, trail looks through earlier sessions in the same project, and when one worked on the same thing, it adds a few lines about it: the session's title and id, the step that matched, how it ended, and the files it edited. The MCP server waits for the agent to ask; the hook hands it over up front.
+
+It is off unless you install it. Added text costs tokens on every turn and can steer an agent the wrong way, so the hook is built to stay quiet:
+
+- It adds something only when a past step matches the prompt closely (`-min-score`, 0.4 by default). Most prompts get nothing.
+- It adds about 500 tokens at most (`-max-tokens`) and names three sessions at most (`-max-sessions`).
+- It looks only at sessions filed under the project you're in, and never at the session the prompt is in.
+- Short prompts and `/`, `!` and `#` commands are skipped without a lookup.
+- Everything is redacted like MCP results, markup from old transcripts is stripped, and the block says the notes may be out of date and are background, not instructions.
+- If the lookup takes longer than `-timeout` (3s), it adds nothing.
+
+Claude Code, in `~/.claude/settings.json` or a project's `.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "trail recall", "timeout": 10 }] }
+    ]
+  }
+}
+```
+
+Codex, in `~/.codex/hooks.json` or a project's `.codex/hooks.json`, with `codex_hooks = true` under `[features]` in `config.toml` on versions that still gate hooks behind it:
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "trail recall", "timeout": 10 }] }
+    ]
+  }
+}
+```
+
+Put the same `-claude-dir`-style flags before `recall` if your agent folders aren't in the default places. `TRAIL_RECALL=off` turns an installed hook off for one shell or one run.
+
+Try it before installing: `trail recall "the prompt you'd type"` prints what would be added, and `-explain` lists the closest sessions and their scores. `trail recall -eval .` replays every prompt in this project's history against the sessions that came before it and prints how often each cutoff would add something, and how often the session it named edited the same files (a rough stand-in for "it would have helped"). `-log file` appends a line per prompt with what was added and how long it took.
+
+The first run reads the project's sessions; after that trail keeps what it read in its cache folder (`recall/` beside the vectors), readable only by you, and a prompt re-reads only the logs that changed. If the first run times out, the hook adds nothing and fills the cache in the background, so the next prompt is quick. `-forget` deletes the cache.
+
+Matching is by words, not meaning, so a prompt has to share a project's distinctive words with a past one to bring it up. `bench/recall` holds the offline relevance check and an A/B benchmark that runs the same tasks headless with the hook off and on; [its README](bench/recall/README.md) has the latest numbers.
+
 ## Notes and bookmarks
 
 Choose Bookmark at the top of a session (or press `b`) to mark it, and Add a note to write about it. Hover any step and click its star to bookmark that step; a box opens under it for a note. Notes save as you type.
@@ -304,6 +351,8 @@ export.go    one session as a self-contained HTML file
 notes.go     your notes and bookmarks, in trail's own file
 redact.go    secret redaction for exports and MCP results
 mcp.go       trail -mcp: the MCP server and its tools
+recall.go    trail recall: the prompt hook, its scoring and -eval
+recall_cache.go  the cache that keeps the hook quick
 retro.go     lessons: repeated corrections and failing commands as suggested rules
 compare.go   two sessions side by side, and -compare
 live.go      live updates for a session that is still being written
