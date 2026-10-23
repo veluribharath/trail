@@ -24,6 +24,7 @@ type Index struct {
 	byKey    map[string]*Session
 	scanned  time.Time
 	scanning sync.Mutex
+	changes  int // session files read or dropped by scans so far
 
 	errs map[string]string // provider -> its last Discover error
 
@@ -197,9 +198,11 @@ func (x *Index) Scan(maxAge time.Duration) []ProviderStatus {
 		wg.Wait()
 
 		x.mu.Lock()
+		x.changes += len(jobs)
 		for path := range x.entries {
 			if !live[path] {
 				delete(x.entries, path)
+				x.changes++
 			}
 		}
 		x.byKey = map[string]*Session{}

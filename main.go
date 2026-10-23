@@ -52,7 +52,7 @@ func main() {
 	semantic := flag.Bool("semantic", false, "also find steps by meaning, using a local embedding model (see -embed-url)")
 	embedURL := flag.String("embed-url", "http://127.0.0.1:11434", "embedding server for -semantic: Ollama, or an OpenAI-compatible URL ending in /v1")
 	embedModel := flag.String("embed-model", "nomic-embed-text", "embedding model for -semantic")
-	forget := flag.Bool("forget", false, "delete the vectors -semantic cached and exit (notes and bookmarks are kept)")
+	forget := flag.Bool("forget", false, "delete the vectors -semantic cached and the index trail recall cached, and exit (notes and bookmarks are kept)")
 	listNotes := flag.Bool("notes", false, "print your bookmarked and annotated sessions and exit")
 	showPrices := flag.Bool("prices", false, "print the token prices used for API-equivalent costs and exit")
 	stats := flag.String("stats", "", "print activity for the last N days (or all) and exit")
@@ -65,7 +65,7 @@ func main() {
 	mcp := flag.Bool("mcp", false, "serve the Model Context Protocol on standard input and output, so an agent can search past sessions")
 	showVersion := flag.Bool("version", false, "print the version and exit")
 	flag.Usage = func() {
-		fmt.Fprintln(flag.CommandLine.Output(), "usage: trail [flags]\n       trail [flags] blame file[:line[-line]]\n       trail [flags] -compare A B\n\nflags:")
+		fmt.Fprintln(flag.CommandLine.Output(), "usage: trail [flags]\n       trail [flags] blame file[:line[-line]]\n       trail [flags] -compare A B\n       trail [flags] recall [-h for its flags]\n\nflags:")
 		flag.PrintDefaults()
 	}
 	flag.Parse()
@@ -84,16 +84,17 @@ func main() {
 	}
 
 	if *forget {
-		dir := cacheDir()
-		if dir == "" {
+		if cacheDir() == "" {
 			fmt.Fprintln(os.Stderr, "trail: no cache directory on this system")
 			os.Exit(1)
 		}
-		if err := os.RemoveAll(dir); err != nil {
-			fmt.Fprintln(os.Stderr, "trail:", err)
-			os.Exit(1)
+		for _, dir := range []string{cacheDir(), recallCacheDir()} {
+			if err := os.RemoveAll(dir); err != nil {
+				fmt.Fprintln(os.Stderr, "trail:", err)
+				os.Exit(1)
+			}
+			fmt.Println("deleted", dir)
 		}
-		fmt.Println("deleted", dir)
 		return
 	}
 
@@ -107,6 +108,16 @@ func main() {
 			}
 		}
 		if err := newMCPServer(idx, sem, currentVersion()).Serve(os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintln(os.Stderr, "trail:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if flag.Arg(0) == "recall" {
+		if err := runRecall(idx, flag.Args()[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
+			if err == flag.ErrHelp {
+				return
+			}
 			fmt.Fprintln(os.Stderr, "trail:", err)
 			os.Exit(1)
 		}

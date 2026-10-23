@@ -1,0 +1,13 @@
+usage: ledger [-h] [--item DESC:QTY:PRICE] [--tax PCT] [--discount PCT]
+              [--currency CURRENCY] [--date YYYY-MM-DD]
+
+Print an invoice.
+
+options:
+  -h, --help            show this help message and exit
+  --item DESC:QTY:PRICE
+                        a line item; repeat for more
+  --tax PCT             tax rate in percent
+  --discount PCT        discount in percent, before tax
+  --currency CURRENCY   currency code to print
+  --date YYYY-MM-DD     invoice date (default: today)

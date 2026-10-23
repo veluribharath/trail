@@ -1,0 +1,10 @@
+[
+  {"id": "due-days", "kind": "repeat", "check": "due_days",
+   "prompt": "Add a --due-days option to the ledger CLI: an integer, default 30. The printed invoice should get a line 'Due: YYYY-MM-DD', that many days after the invoice date. Keep the test suite passing."},
+  {"id": "discount-rounding", "kind": "repeat", "check": "discount_rounding",
+   "prompt": "Customers say discounted invoices are sometimes a cent off, e.g. a 10% discount on 10.25 comes out as 1.02 instead of 1.03. Fix it and keep the test suite passing."},
+  {"id": "slugify", "kind": "new", "check": "slugify",
+   "prompt": "Add slugify(s) to ledger/text.py: lowercase, turn every run of characters that aren't letters or digits into a single hyphen, and strip hyphens from both ends. Keep the test suite passing."},
+  {"id": "overdue", "kind": "new", "check": "overdue",
+   "prompt": "Add count_overdue(invoices, today) to ledger/reports.py. Each invoice is a dict with a 'due' date and a 'paid' bool; count the unpaid ones whose due date is before today. Keep the test suite passing."}
+]
